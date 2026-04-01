@@ -45,19 +45,41 @@ class TestClean:
             },
         }})
 
-    def test_longpress_valid(self):
+    def test_gesture_single_only_valid(self):
+        assert_clean({"default": {
+            "CC0": {"single": [{"send": "CC10", "value": 1}]},
+        }})
+
+    def test_gesture_long_valid(self):
         assert_clean({"default": {
             "CC30": {
-                "tap":  [{"send": "PC1"}],
-                "long": [{"send": "PC2"}],
+                "single": [{"send": "PC1"}],
+                "long":   [{"send": "PC2"}],
             },
         }})
 
-    def test_multipress_valid(self):
+    def test_gesture_multi_valid(self):
         assert_clean({"default": {
             "PC4": {
                 "single": [{"send": "CC10", "value": 1}],
                 "double": [{"send": "CC11", "value": 2}],
+            },
+        }})
+
+    def test_gesture_combined_valid(self):
+        assert_clean({"default": {
+            "CC0": {
+                "single": [{"send": "CC10", "value": 1}],
+                "double": [{"send": "CC11", "value": 2}],
+                "long":   [{"send": "CC12", "value": 3}],
+            },
+        }})
+
+    def test_gesture_note_long_valid(self):
+        assert_clean({"default": {
+            "NOTE60": {
+                "single": [{"send": "CC10", "value": 127}],
+                "long":   [{"send": "CC11", "value": 127}],
             },
         }})
 
@@ -76,6 +98,30 @@ class TestClean:
             "other": {},
         })
 
+    def test_trigger_value_int_valid(self):
+        assert_clean({"default": {
+            "CC0": {
+                "trigger_value": 127,
+                "single": [{"send": "CC10", "value": 1}],
+            },
+        }})
+
+    def test_trigger_value_range_valid(self):
+        assert_clean({"default": {
+            "CC0": {
+                "trigger_value": "64-127",
+                "single": [{"send": "CC10", "value": 1}],
+            },
+        }})
+
+    def test_trigger_value_list_valid(self):
+        assert_clean({"default": {
+            "CC0": {
+                "trigger_value": [0, "64-127"],
+                "single": [{"send": "CC10", "value": 1}],
+            },
+        }})
+
 
 # ---------------------------------------------------------------------------
 # Missing / malformed send
@@ -85,7 +131,7 @@ class TestSendErrors:
 
     def test_missing_send_key(self):
         assert_error({"default": {
-            "PC5": [{"value": 64}],   # no "send"
+            "PC5": [{"value": 64}],
         }}, "missing required 'send' key")
 
     def test_unrecognised_send_prefix(self):
@@ -107,6 +153,16 @@ class TestSendErrors:
         assert_error({"default": {
             "PC5": [{"send": "NOTEabc"}],
         }}, "malformed send")
+
+    def test_velocity_on_cc_send_caught(self):
+        assert_error({"default": {
+            "PC5": [{"send": "CC10", "velocity": 127}],
+        }}, "did you mean 'value'")
+
+    def test_value_on_note_send_caught(self):
+        assert_error({"default": {
+            "PC5": [{"send": "NOTE36", "value": 127}],
+        }}, "did you mean 'velocity'")
 
 
 # ---------------------------------------------------------------------------
@@ -161,7 +217,6 @@ class TestStructuralErrors:
         assert_error({"default": {
             "CC22": {
                 "a": [{"send": "CC40", "value": 127}],
-                # "b" is missing
             },
         }}, "missing required state 'b'")
 
@@ -174,7 +229,7 @@ class TestStructuralErrors:
 
     def test_bank_send_missing_bank_key(self):
         assert_error({"default": {
-            "PC1": [{"send": "BANK"}],   # no "bank" key
+            "PC1": [{"send": "BANK"}],
         }}, "BANK send missing 'bank' key")
 
     def test_bank_send_unknown_target(self):
@@ -188,7 +243,6 @@ class TestStructuralErrors:
         assert any("active_bank" in e for e in errs)
 
     def test_unclassifiable_entry(self):
-        # A dict with no recognised action keys
         bs, _ = make_bankset({"default": {
             "PC1": {"unknown_key": "something"},
         }})
@@ -197,8 +251,25 @@ class TestStructuralErrors:
 
     def test_multiple_errors_all_reported(self):
         errs = errors_for({"default": {
-            "PC1": [{"value": 1}],          # missing send
-            "PC2": [{"send": "CC128"}],     # out of range
-            "PC3": [{"send": "PCabc"}],     # malformed
+            "PC1": [{"value": 1}],
+            "PC2": [{"send": "CC128"}],
+            "PC3": [{"send": "PCabc"}],
         }})
         assert len(errs) == 3
+
+    def test_long_on_pc_key_caught(self):
+        # PC events have no release signal; 'long' is invalid for PC keys.
+        assert_error({"default": {
+            "PC4": {
+                "single": [{"send": "CC10", "value": 1}],
+                "long":   [{"send": "CC11", "value": 1}],
+            },
+        }}, "momentary input")
+
+    def test_trigger_value_invalid_syntax(self):
+        assert_error({"default": {
+            "CC0": {
+                "trigger_value": "not-a-number",
+                "single": [{"send": "CC10", "value": 1}],
+            },
+        }}, "invalid trigger_value")

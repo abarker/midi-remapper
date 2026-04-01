@@ -53,6 +53,9 @@ class FakeTimer:
         if not self.cancelled:
             self.fn(*self.args)
 
+    def is_alive(self):
+        return not self.cancelled
+
     @classmethod
     def clear(cls):
         cls.instances.clear()
@@ -75,56 +78,17 @@ def fake_timer(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Event factory
+# Fixtures wrapping helpers from midi_event_remapper.testing
 # ---------------------------------------------------------------------------
 
-def make_pc(program, port=1, channel=1):
-    return FakeInputEvent("PROGRAM", port=port, channel=channel,
-                          program=program)
-
-def make_cc(ctrl, value=127, port=1, channel=1):
-    return FakeInputEvent("CTRL", port=port, channel=channel,
-                          ctrl=ctrl, value=value)
-
-def make_note(note, port=1, channel=1):
-    return FakeInputEvent("NOTEON", port=port, channel=channel, note=note)
+from midi_event_remapper.testing import make_bankset, make_pc, make_cc, make_note, make_noteoff
 
 
 @pytest.fixture
 def events():
     """Factory functions for common input event types."""
-    return {"pc": make_pc, "cc": make_cc, "note": make_note}
-
-
-# ---------------------------------------------------------------------------
-# BankSet factory
-# ---------------------------------------------------------------------------
-
-from midi_event_remapper.bankset import BankSet
-
-
-def make_bankset(banks, active_bank="default", **kwargs):
-    """
-    Create a BankSet wired to a captured output list.
-
-    Returns (bankset, output_list) where output_list accumulates every
-    event passed to output_fn.
-    """
-    captured = []
-    bs = BankSet(
-        name                  = "test",
-        banks                 = banks,
-        active_bank           = active_bank,
-        output_fn             = captured.append,
-        debug                 = False,
-        data_offset           = kwargs.pop("data_offset", 1),
-        debounce_ms           = kwargs.pop("debounce_ms", 0),
-        multi_press_window_ms = kwargs.pop("multi_press_window_ms", 300),
-        chord_window_ms       = kwargs.pop("chord_window_ms", 80),
-        long_press_ms         = kwargs.pop("long_press_ms", 500),
-        **kwargs,
-    )
-    return bs, captured
+    return {"pc": make_pc, "cc": make_cc, "note": make_note,
+            "noteoff": make_noteoff}
 
 
 @pytest.fixture

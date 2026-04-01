@@ -6,10 +6,11 @@ conftest.py before any package imports occur, so midi.py's normal
 'from mididings import ...' calls receive these objects instead.
 """
 
-# Event type constants -- match the string keys used in event_key().
+# Event type constants
 PROGRAM = "PROGRAM"
 CTRL    = "CTRL"
 NOTEON  = "NOTEON"
+NOTEOFF = "NOTEOFF"
 
 
 class FakeOutputEvent:

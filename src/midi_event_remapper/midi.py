@@ -7,7 +7,7 @@ types directly.  The mididings module is expected to be present in
 sys.modules before this module is imported; in tests, conftest.py injects
 a mock before any package imports occur.
 """
-from mididings import PROGRAM, CTRL, NOTEON
+from mididings import PROGRAM, CTRL, NOTEON, NOTEOFF
 from mididings.event import (
     ProgramEvent, CtrlEvent, NoteOnEvent, NoteOffEvent, SysExEvent,
 )
@@ -19,19 +19,36 @@ def event_key(event):
     Returns one of:
         'PC<n>'    for program-change events
         'CC<n>'    for control-change events (including CC=0 releases)
-        'NOTE<n>'  for note-on events
+        'NOTE<n>'  for note-on AND note-off events
         None       for any other event type
 
-    CC=0 release events intentionally receive a key so that the
-    long-press machinery in BankSet can intercept them.
+    Both NoteOn and NoteOff map to the same key so that gesture handling
+    (long press, double tap) works symmetrically for note-based buttons.
+    CC=0 and NoteOff are distinguished by is_release() rather than by key.
     """
     if event.type == PROGRAM:
         return f"PC{event.program}"
     elif event.type == CTRL:
         return f"CC{event.ctrl}"
-    elif event.type == NOTEON:
+    elif event.type in (NOTEON, NOTEOFF):
         return f"NOTE{event.note}"
     return None
+
+
+def is_release(event):
+    """Return True if this event is a release signal.
+
+    Release signals are:
+        CC events with value == 0  (momentary CC release)
+        NoteOff events             (note release)
+
+    Used by BankSet to route events to gesture release handling.
+    """
+    if event.type == CTRL:
+        return getattr(event, 'value', 0) == 0
+    if event.type == NOTEOFF:
+        return True
+    return False
 
 
 def build_event(item, port, channel, event_value=None):
@@ -42,13 +59,15 @@ def build_event(item, port, channel, event_value=None):
 
     Optional keys (with defaults):
         'delay'    -- seconds before sending              (default 0.0)
-        CC sends:   'value'    -- CC value 0-127
-                                  if omitted, the incoming event's value
-                                  is passed through (event_value); if that
-                                  is also absent, defaults to 127
+        CC sends:   'value'    -- CC value 0-127.
+                                  If omitted, the incoming event's value
+                                  is passed through (event_value).
         NOTE sends: 'velocity' -- note velocity 0-127     (default 127)
                     'note_off' -- send NoteOff if True     (default False)
         PC sends:   (no extra keys needed)
+
+    Using 'velocity' on a CC send or 'value' on a NOTE send is a config
+    error caught by validate() at startup.
 
     'BANK' sends are handled by BankSet._execute_sequence before reaching
     this function and will raise ValueError if passed in here.

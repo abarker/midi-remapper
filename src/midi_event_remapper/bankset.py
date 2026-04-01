@@ -5,7 +5,7 @@ BankSet class: a named collection of MIDI event mapping banks.
 
 This module has no mididings dependency.  All mididings interaction is
 handled via the output_fn parameter (injected by dispatcher.py) and the
-build_event / event_key functions imported from midi.py.
+build_event / event_key / is_release functions imported from midi.py.
 
 See the config.py module docstring for the full schema of bank entry
 types and sequence item formats.
@@ -13,7 +13,7 @@ types and sequence item formats.
 import threading
 import time
 
-from midi_event_remapper.midi import build_event, event_key
+from midi_event_remapper.midi import build_event, event_key, is_release
 
 
 class BankSet:
@@ -24,17 +24,17 @@ class BankSet:
     to behaviour definitions.  The behaviour type is inferred from the
     shape of the value:
 
-        List value             -> direct: fires immediately, no state
-        Dict with a / b        -> toggle: alternates between two sequences
-        Dict with tap / long   -> long press (momentary CC only):
-                                  tap fires on quick release,
-                                  long fires after long_ms; no window delay
-        Dict with single /     -> multi-press: accumulates presses within
-          double / triple         multi_press_window_ms, then dispatches;
-                                  incurs a delay on every press
-        Tuple key              -> chord: all keys must arrive within
-                                  chord_window_ms; falls back to
-                                  individual dispatch if incomplete
+        List value               -> direct: fires immediately, no state
+        Dict with a / b          -> toggle: alternates between two sequences
+        Dict with any of         -> gesture: unified handler for single,
+          single/double/triple/     double, triple press and long hold.
+          long                      'long' requires a momentary input
+                                    (CC or NOTE) that sends a release signal.
+                                    'single' behaves as a tap when 'long'
+                                    is also defined.
+        Tuple key                -> chord: all keys must arrive within
+                                    chord_window_ms; falls back to
+                                    individual dispatch if incomplete.
 
     Parameters
     ----------
@@ -45,9 +45,8 @@ class BankSet:
     active_bank : str
         Name of the initially active bank.
     output_fn : callable or None
-        Called with a single mididings event argument to emit output from
-        timer callbacks.  Set to engine.output_event by dispatcher.py.
-        Must be set before any timer-fired dispatch can occur.
+        Called with a single mididings event to emit output from timer
+        callbacks.  Set to engine.output_event by dispatcher.py.
     debug : bool
         Whether to print diagnostic output.
     data_offset : int
@@ -63,8 +62,10 @@ class BankSet:
         Default long-press threshold in milliseconds.
     """
 
-    # Top-level dict keys that are config metadata, not action labels.
-    _META_KEYS = frozenset({"debounce_ms", "long_ms"})
+    # Config dict keys that are metadata, not action labels.
+    _META_KEYS    = frozenset({"long_ms", "trigger_value", "debounce_ms"})
+    # Valid action labels for gesture entries.
+    _GESTURE_KEYS = frozenset({"single", "double", "triple", "long"})
 
     def __init__(
         self,
@@ -91,18 +92,17 @@ class BankSet:
         self._chord_window_ms       = chord_window_ms
         self._long_press_ms         = long_press_ms
 
-        # Toggle state: key -> bool (False = state "a", True = state "b")
-        # Persists across bank switches intentionally.
-        self._toggle_states = {}   # key -> bool
+        # Toggle state. Persists across bank switches intentionally.
+        self._toggle_states = {}   # key -> bool (False=a, True=b)
         self._toggle_ts     = {}   # key -> float (last trigger time)
 
-        # Multi-press state
-        self._press_counts  = {}   # key -> int
-        self._press_timers  = {}   # key -> Timer
-        self._press_events  = {}   # key -> mididings event
-
-        # Long-press state: key -> float (press timestamp)
-        self._lp_starts     = {}
+        # Unified gesture state (replaces separate longpress / multipress dicts)
+        self._gesture_counts     = {}  # key -> int   (accumulated press count)
+        self._gesture_press_time = {}  # key -> float (time of most recent press)
+        self._gesture_timers     = {}  # key -> Timer (multipress window timer)
+        self._gesture_events     = {}  # key -> event (most recent press event)
+        self._gesture_long_timers = {} # key -> Timer (long-press threshold timer)
+        self._gesture_long_fired  = set()  # keys where long already fired via timer
 
         # Chord state
         # frozenset -> {"arrived": set, "timer": Timer,
@@ -111,12 +111,12 @@ class BankSet:
         self._chord_pending  = {}
 
         # Keys whose presses were consumed by a completed chord.
-        # Their CC=0 releases are suppressed to prevent them firing
-        # mappings in whatever bank is active at release time.
+        # Their releases are suppressed to prevent them firing mappings
+        # in whatever bank is active at release time.
         self._chord_consumed = set()
 
         # Keep timer references alive until they fire.
-        self._timer_list    = []
+        self._timer_list = []
 
         # Precomputed lookup tables
         self._entry_types   = {}   # (bank_name, key) -> type string
@@ -169,51 +169,60 @@ class BankSet:
             print(f"[BankSet:{self.name}] handle key={key}")
 
         # Periodically remove dead timers to prevent unbounded growth.
-        # Timer threads accumulate quickly with frequent chord attempts.
         if len(self._timer_list) > 50:
             self._cleanup_timers()
 
-        # ── CC=0 release handling ──────────────────────────────────────
-        if hasattr(event, 'value') and event.value == 0:
+        rel = is_release(event)
+
+        # ── Release handling ───────────────────────────────────────────
+        if rel:
             # Suppress releases for keys consumed by a completed chord.
-            # Without this, the release would fire mappings in whatever
-            # bank became active after the chord switched banks.
             if key in self._chord_consumed:
                 self._chord_consumed.discard(key)
                 return []
-            # Long-press release on a mapped longpress key.
-            if (bank_name, key) in self._entry_types and \
-               self._entry_types[(bank_name, key)] == "longpress":
-                return self._handle_longpress_release(key, bank[key], event)
-            # Fast chord dismissal: if this CC key is a member of any
-            # pending fast chord, cancel the window and return the fallback
-            # events directly to mididings (safe from within the callback).
-            fallback = self._maybe_dismiss_fast_chord(key, bank_name, bank)
+
+            # Long press already fired via timer: suppress the release.
+            if key in self._gesture_long_fired:
+                self._gesture_long_fired.discard(key)
+                return []
+
+            # Gesture release: long-press detection.
+            # Only intercept if we recorded a press for this key.
+            if key in self._gesture_press_time:
+                etype = self._entry_types.get((bank_name, key))
+                if etype == "gesture":
+                    return self._handle_gesture_release(
+                        key, bank.get(key, {}), event
+                    )
+
+            # Fast chord dismissal on CC=0 release.
+            fallback = self._maybe_dismiss_fast_chord(key, bank_name, bank, event)
             if fallback is not None:
                 return fallback
-            # CC=0 not consumed by any of the above.
-            # If the key has a direct mapping, fall through to normal
-            # dispatch so the release is remapped the same way as the
-            # press (value is passed through via event_value in
-            # _execute_sequence).  Otherwise pass through unchanged.
+
+            # Determine how to handle the release based on entry type.
             etype = self._entry_types.get((bank_name, key))
-            if etype != "direct":
-                return None
-            # fall through to normal single-key dispatch below
+            if etype is None:
+                return None        # unmapped: pass release through unchanged
+            if etype == "direct":
+                pass               # fall through to normal dispatch
+            elif etype == "gesture":
+                # No prior press recorded.  If 'long' is defined, pass
+                # through so the orphan release reaches downstream devices.
+                # If no 'long', suppress: nothing timing-based is pending.
+                entry = bank.get(key, {})
+                return None if "long" in entry else []
+            else:
+                return []          # toggle/chord: suppress release
 
         # ── Chord participation ────────────────────────────────────────
-        # If this key participates in any chord in the current bank, the
-        # chord machinery takes ownership of the event.  If the chord
-        # window expires without all keys arriving, the individual key
-        # entry is dispatched as a fallback (see _handle_chord_arrival).
-        # CC=0 release events are explicitly excluded: they are handled
-        # above as long-press releases or fast-chord dismissals and must
-        # never be treated as new chord presses.
-        is_release = hasattr(event, 'value') and event.value == 0
-        if not is_release and key in chord_members:
-            result = self._handle_chord_arrival(key, chord_members[key], bank, event)
-            # None: chord window opened/updated, not yet complete -- suppress.
-            # list: chord just completed, return its events to mididings.
+        # CC=0/NoteOff releases are excluded above and never reach here.
+        if not rel and key in chord_members:
+            result = self._handle_chord_arrival(
+                key, chord_members[key], bank, event
+            )
+            # None: window opened/updated, not yet complete -- suppress.
+            # list: chord just completed, return events to mididings.
             return result if result is not None else []
 
         # ── Normal single-key dispatch ─────────────────────────────────
@@ -227,12 +236,8 @@ class BankSet:
             return self._execute_sequence(entry, event)
         elif etype == "toggle":
             return self._handle_toggle(key, entry, event)
-        elif etype == "longpress":
-            self._handle_longpress_press(key)
-            return None   # nothing emitted until release
-        elif etype == "multipress":
-            self._handle_multipress(key, entry, event)
-            return None   # always dispatched via timer
+        elif etype == "gesture":
+            return self._handle_gesture_press(key, entry, event)
 
         return None
 
@@ -242,9 +247,9 @@ class BankSet:
         Returns a list of error strings; an empty list means no errors.
         Called at startup before run().
         """
-        errors  = []
-        pc_min  = self._data_offset
-        pc_max  = 127 + self._data_offset
+        errors = []
+        pc_min = self._data_offset
+        pc_max = 127 + self._data_offset
 
         def check_sequence(seq, ctx):
             for i, item in enumerate(seq):
@@ -263,6 +268,18 @@ class BankSet:
                             f"bank {item['bank']!r}"
                         )
                     continue
+                # Wrong keyword checks
+                if send.startswith("CC") and "velocity" in item:
+                    errors.append(
+                        f"{ctx}[{i}]: CC send uses 'velocity' -- "
+                        f"did you mean 'value'?"
+                    )
+                if send.startswith("NOTE") and "value" in item:
+                    errors.append(
+                        f"{ctx}[{i}]: NOTE send uses 'value' -- "
+                        f"did you mean 'velocity'?"
+                    )
+                # Range checks
                 if send.startswith("PC"):
                     try:
                         n = int(send[2:])
@@ -273,37 +290,64 @@ class BankSet:
                                 f"data_offset={self._data_offset})"
                             )
                     except ValueError:
-                        errors.append(
-                            f"{ctx}[{i}]: malformed send {send!r}"
-                        )
+                        errors.append(f"{ctx}[{i}]: malformed send {send!r}")
                 elif send.startswith("CC"):
                     try:
                         n = int(send[2:])
                         if not (0 <= n <= 127):
                             errors.append(
-                                f"{ctx}[{i}]: {send!r} CC number out of "
-                                f"range (0-127)"
+                                f"{ctx}[{i}]: {send!r} CC number "
+                                f"out of range (0-127)"
                             )
                     except ValueError:
-                        errors.append(
-                            f"{ctx}[{i}]: malformed send {send!r}"
-                        )
+                        errors.append(f"{ctx}[{i}]: malformed send {send!r}")
                 elif send.startswith("NOTE"):
                     try:
                         n = int(send[4:])
                         if not (0 <= n <= 127):
                             errors.append(
-                                f"{ctx}[{i}]: {send!r} note number out of "
-                                f"range (0-127)"
+                                f"{ctx}[{i}]: {send!r} note number "
+                                f"out of range (0-127)"
                             )
                     except ValueError:
-                        errors.append(
-                            f"{ctx}[{i}]: malformed send {send!r}"
-                        )
+                        errors.append(f"{ctx}[{i}]: malformed send {send!r}")
                 elif send != "SYSEX":
                     errors.append(
                         f"{ctx}[{i}]: unrecognised send {send!r}"
                     )
+
+        def check_trigger_value(tv, ctx):
+            """Validate trigger_value syntax."""
+            def check_one(spec):
+                if isinstance(spec, int):
+                    return
+                if isinstance(spec, str):
+                    s = spec.strip()
+                    try:
+                        for prefix in (">=", "<=", ">", "<"):
+                            if s.startswith(prefix):
+                                int(s[len(prefix):].strip())
+                                return
+                        if '-' in s:
+                            lo, hi = s.split('-', 1)
+                            int(lo.strip())
+                            int(hi.strip())
+                            return
+                        int(s)
+                    except ValueError:
+                        errors.append(
+                            f"{ctx}: invalid trigger_value spec {spec!r}"
+                        )
+                    return
+                errors.append(
+                    f"{ctx}: trigger_value item must be int or str, "
+                    f"got {type(spec).__name__}"
+                )
+            if isinstance(tv, list):
+                for item in tv:
+                    check_one(item)
+            else:
+                check_one(tv)
 
         def check_entry(key, value, bank_name):
             ctx = f"BankSet[{self.name!r}][{bank_name!r}][{key!r}]"
@@ -322,16 +366,23 @@ class BankSet:
                         )
                     else:
                         check_sequence(value[state], f"{ctx}[{state!r}]")
-            elif etype == "longpress":
-                for action in ("tap", "long"):
-                    if action in value:
-                        check_sequence(value[action], f"{ctx}[{action!r}]")
-            elif etype in ("multipress", "chord"):
+            elif etype == "gesture":
+                # 'long' requires a release signal: CC or NOTE only, not PC
+                if "long" in value and isinstance(key, str) and \
+                   key.startswith("PC"):
+                    errors.append(
+                        f"{ctx}: 'long' requires a momentary input "
+                        f"(CC or NOTE); PC events have no release signal"
+                    )
+                if "trigger_value" in value:
+                    check_trigger_value(value["trigger_value"], ctx)
+                for label in ("single", "double", "triple", "long"):
+                    if label in value:
+                        check_sequence(value[label], f"{ctx}[{label!r}]")
+            elif etype == "chord":
                 for label in ("single", "double", "triple"):
                     if label in value:
-                        check_sequence(
-                            value[label], f"{ctx}[{label!r}]"
-                        )
+                        check_sequence(value[label], f"{ctx}[{label!r}]")
 
         for bank_name, bank in self.banks.items():
             for key, value in bank.items():
@@ -352,7 +403,7 @@ class BankSet:
     def _cleanup_timers(self):
         """Remove completed or cancelled timers from _timer_list.
 
-        Each chord window, multipress window, and delayed send creates a
+        Each chord window, gesture timer, and delayed send creates a
         threading.Timer (which is a thread).  Without cleanup, the list
         grows indefinitely with dead threads, eventually causing hangs.
         Called automatically from handle() when the list exceeds 50 entries.
@@ -366,8 +417,8 @@ class BankSet:
                 try:
                     etype = self._classify(key, value)
                 except ValueError:
-                    # Unclassifiable entry — store sentinel so validate()
-                    # can report it cleanly rather than crashing __init__.
+                    # Unclassifiable: store sentinel so validate() reports it
+                    # cleanly rather than crashing __init__.
                     etype = "unknown"
                 self._entry_types[(bank_name, key)] = etype
                 if isinstance(key, tuple):
@@ -387,10 +438,8 @@ class BankSet:
             action_keys = set(value.keys()) - self._META_KEYS
             if action_keys <= {"a", "b"}:
                 return "toggle"
-            if action_keys <= {"tap", "long"}:
-                return "longpress"
-            if action_keys <= {"single", "double", "triple"}:
-                return "multipress"
+            if action_keys and action_keys <= self._GESTURE_KEYS:
+                return "gesture"
         raise ValueError(
             f"BankSet {self.name!r}: cannot classify entry "
             f"key={key!r}, value={value!r}"
@@ -404,8 +453,8 @@ class BankSet:
         """
         Execute a sequence list.  Immediate events are returned as a list.
         Delayed events are scheduled via threading.Timer.
-        BANK sends are executed inline (delay key is ignored for BANK).
-        Returns a non-empty list or None.
+        BANK sends are executed inline.
+        Returns a list (possibly empty -- empty means "handled, emit nothing").
         """
         immediate = []
         for item in seq:
@@ -416,11 +465,13 @@ class BankSet:
                 self.switch_bank(item["bank"])
                 continue
 
-            if item.get("press_only") and getattr(event, 'value', None) == 0:
+            if item.get("press_only") and is_release(event):
                 continue
 
-            ev_out = build_event(item, event.port, event.channel,
-                                  event_value=getattr(event, 'value', None))
+            ev_out = build_event(
+                item, event.port, event.channel,
+                event_value=getattr(event, 'value', None)
+            )
 
             if delay <= 0:
                 immediate.append(ev_out)
@@ -429,21 +480,16 @@ class BankSet:
             else:
                 if self._debug:
                     print(f"  [seq] -> in {delay:.3f}s: {ev_out}")
-                t = threading.Timer(
-                    delay, self._output_fn, args=(ev_out,)
-                )
+                t = threading.Timer(delay, self._output_fn, args=(ev_out,))
                 t.daemon = True
                 t.start()
                 self._timer_list.append(t)
 
-        # Return immediate list even if empty. An empty list signals
-        # "this event was handled, emit nothing" -- which drops the event.
-        # Returning None would mean "not handled", causing pass-through.
         return immediate
 
     def _fire_sequence(self, seq, event):
         """
-        Like _execute_sequence but routes all immediate events through
+        Like _execute_sequence but routes immediate events through
         self._output_fn.  Used from timer callbacks where returning a
         value to mididings is not possible.
         """
@@ -475,59 +521,170 @@ class BankSet:
         return self._execute_sequence(entry[state_key], event)
 
     # ------------------------------------------------------------------
-    # Long press
+    # Gesture (unified single / double / triple / long)
     # ------------------------------------------------------------------
 
-    def _handle_longpress_press(self, key):
-        """Record the press timestamp.  Dispatch happens on CC=0 release."""
-        self._lp_starts[key] = time.time()
-        if self._debug:
-            print(f"[longpress:{self.name}] key={key} pressed")
+    def _handle_gesture_press(self, key, entry, event):
+        """
+        Handle a press event for a gesture entry.
 
-    def _handle_longpress_release(self, key, entry, event):
-        """Measure elapsed time since press and dispatch tap or long."""
-        start = self._lp_starts.pop(key, None)
-        if start is None:
+        If only 'single' is defined with no 'long' or multi-press labels,
+        fires immediately with no timing delay.
+
+        If 'long' is defined, starts a long_ms timer that fires the 'long'
+        action immediately when the threshold is exceeded -- no need to wait
+        for the release.  The release is suppressed when it eventually arrives.
+
+        Otherwise accumulates press count and/or records press time,
+        relying on _handle_gesture_release and _reset_gesture_timer to
+        dispatch the final action.
+        """
+        if not self._matches_trigger_value(entry, event):
+            return None   # trigger_value filter failed: pass through
+
+        has_long   = "long" in entry
+        has_multi  = "double" in entry or "triple" in entry
+        has_single = "single" in entry
+
+        # Accumulate state
+        self._gesture_counts[key] = self._gesture_counts.get(key, 0) + 1
+        self._gesture_press_time[key] = time.time()
+        self._gesture_events[key]     = event
+
+        if not has_long and not has_multi:
+            # Only 'single' defined: fire immediately, no timing needed.
+            self._gesture_counts.pop(key, None)
+            self._gesture_press_time.pop(key, None)
+            self._gesture_events.pop(key, None)
+            if has_single:
+                return self._execute_sequence(entry["single"], event)
+            return []
+
+        if has_multi and not has_long:
+            # Multi-press only (no long): start the window timer on press.
+            # Each new press resets the timer.
+            self._reset_gesture_timer(key, entry, event)
+
+        if has_long:
+            # Start a long-press timer that fires immediately when the
+            # threshold is exceeded, without waiting for release.
+            self._start_long_timer(key, entry, event)
+
+        # Suppress the press; dispatch happens on release or timer.
+        return []
+
+    def _start_long_timer(self, key, entry, event):
+        """
+        Start (or restart) a timer that fires the 'long' action as soon as
+        the hold threshold is exceeded.  When it fires, the key is marked
+        as long-fired so the subsequent release is suppressed.
+        """
+        # Cancel any existing long timer for this key.
+        existing = self._gesture_long_timers.get(key)
+        if existing:
+            existing.cancel()
+
+        threshold_s = entry.get("long_ms", self._long_press_ms) / 1000.0
+
+        def fire_long(key_=key, entry_=entry, ev_=event):
+            self._gesture_long_timers.pop(key_, None)
+            self._gesture_long_fired.add(key_)
+            # Also cancel any pending multipress timer.
+            mt = self._gesture_timers.pop(key_, None)
+            if mt:
+                mt.cancel()
+            self._gesture_counts.pop(key_, None)
+            self._gesture_events.pop(key_, None)
+            self._gesture_press_time.pop(key_, None)
+            if self._debug:
+                print(f"[gesture:{self.name}] key={key_} -> long (timer)")
+            self._fire_sequence(entry_["long"], ev_)
+
+        t = threading.Timer(threshold_s, fire_long)
+        t.daemon = True
+        t.start()
+        self._gesture_long_timers[key] = t
+        self._timer_list.append(t)
+
+    def _handle_gesture_release(self, key, entry, event):
+        """
+        Handle a release event for a gesture entry.
+
+        If the long timer already fired, suppress the release.
+        Otherwise cancel the long timer and dispatch based on elapsed time:
+        if hold exceeded long_ms fire 'long'; if short press fire 'single'
+        or start the multipress accumulation timer.
+        """
+        press_time = self._gesture_press_time.pop(key, None)
+        if press_time is None:
             return None
-        elapsed_ms = (time.time() - start) * 1000.0
-        threshold  = entry.get("long_ms", self._long_press_ms)
-        action     = "long" if elapsed_ms >= threshold else "tap"
-        if self._debug:
-            print(
-                f"[longpress:{self.name}] key={key} "
-                f"elapsed={elapsed_ms:.0f}ms -> {action}"
-            )
-        if action in entry:
-            return self._execute_sequence(entry[action], event)
-        return None
 
-    # ------------------------------------------------------------------
-    # Multi-press
-    # ------------------------------------------------------------------
+        has_long  = "long" in entry
+        has_multi = "double" in entry or "triple" in entry
 
-    def _handle_multipress(self, key, entry, event):
+        if has_long:
+            # Cancel the long timer -- release arrived before it fired.
+            lt = self._gesture_long_timers.pop(key, None)
+            if lt:
+                lt.cancel()
+
+            elapsed_ms = (time.time() - press_time) * 1000.0
+            threshold  = entry.get("long_ms", self._long_press_ms)
+
+            if elapsed_ms >= threshold:
+                # Release arrived at the same time as threshold -- fire long.
+                mt = self._gesture_timers.pop(key, None)
+                if mt:
+                    mt.cancel()
+                self._gesture_counts.pop(key, None)
+                self._gesture_events.pop(key, None)
+                if self._debug:
+                    print(
+                        f"[gesture:{self.name}] key={key} "
+                        f"elapsed={elapsed_ms:.0f}ms -> long"
+                    )
+                return self._execute_sequence(entry["long"], event)
+
+            # Short press (tap/single).
+            if self._debug:
+                print(
+                    f"[gesture:{self.name}] key={key} "
+                    f"elapsed={elapsed_ms:.0f}ms -> single/tap"
+                )
+            if not has_multi:
+                # No multipress: fire 'single' now.
+                self._gesture_counts.pop(key, None)
+                self._gesture_events.pop(key, None)
+                if "single" in entry:
+                    return self._execute_sequence(entry["single"], event)
+                return []
+            # Has both long and multi: tap confirmed, start multipress timer.
+            self._reset_gesture_timer(key, entry, event)
+            return []
+
+        # No 'long': release carries no action (timer handles everything).
+        return []
+
+    def _reset_gesture_timer(self, key, entry, event):
         """
-        Accumulate presses within multi_press_window_ms then dispatch
-        based on count.  Each new press resets the window timer.
-        Always dispatches via self._output_fn (timer callback).
+        Cancel any existing multipress window timer for key and start a
+        new one.  When the timer fires it dispatches based on the
+        accumulated press count.
         """
-        count = self._press_counts.get(key, 0) + 1
-        self._press_counts[key] = count
-        self._press_events[key] = event
-
-        existing = self._press_timers.pop(key, None)
+        existing = self._gesture_timers.pop(key, None)
         if existing:
             existing.cancel()
 
         def fire(key_=key, entry_=entry):
-            n   = self._press_counts.pop(key_, 1)
-            ev  = self._press_events.pop(key_, event)
-            self._press_timers.pop(key_, None)
-            label = {1: "single", 2: "double", 3: "triple"}.get(n)
+            count = self._gesture_counts.pop(key_, 1)
+            ev    = self._gesture_events.pop(key_, event)
+            self._gesture_timers.pop(key_, None)
+            self._gesture_press_time.pop(key_, None)
+            label = {1: "single", 2: "double", 3: "triple"}.get(count)
             if self._debug:
                 print(
-                    f"[multipress:{self.name}] key={key_} "
-                    f"count={n} -> {label}"
+                    f"[gesture:{self.name}] key={key_} "
+                    f"count={count} -> {label}"
                 )
             if label and label in entry_:
                 self._fire_sequence(entry_[label], ev)
@@ -535,8 +692,65 @@ class BankSet:
         t = threading.Timer(self._multi_press_window_ms / 1000.0, fire)
         t.daemon = True
         t.start()
-        self._press_timers[key] = t
+        self._gesture_timers[key] = t
         self._timer_list.append(t)
+
+    # ------------------------------------------------------------------
+    # Trigger value matching
+    # ------------------------------------------------------------------
+
+    def _matches_trigger_value(self, entry, event):
+        """Return True if the event's data value satisfies trigger_value."""
+        tv = entry.get("trigger_value")
+        if tv is None:
+            return True
+        if hasattr(event, 'value'):
+            val = event.value
+        elif hasattr(event, 'velocity'):
+            val = event.velocity
+        elif hasattr(event, 'program'):
+            val = event.program
+        else:
+            return True
+        return self._value_in_range(tv, val)
+
+    @staticmethod
+    def _value_in_range(spec, value):
+        """
+        Check whether value satisfies a trigger_value spec.
+
+        Spec forms:
+            int          -- exact match
+            "64"         -- exact match
+            "64-127"     -- inclusive range
+            ">64"        -- greater than
+            "<64"        -- less than
+            ">=64"       -- greater than or equal
+            "<=64"       -- less than or equal
+            [spec, ...]  -- list of any of the above (OR logic)
+        """
+        if isinstance(spec, int):
+            return value == spec
+        if isinstance(spec, list):
+            return any(BankSet._value_in_range(s, value) for s in spec)
+        if isinstance(spec, str):
+            s = spec.strip()
+            try:
+                if s.startswith(">="):
+                    return value >= int(s[2:].strip())
+                if s.startswith("<="):
+                    return value <= int(s[2:].strip())
+                if s.startswith(">"):
+                    return value > int(s[1:].strip())
+                if s.startswith("<"):
+                    return value < int(s[1:].strip())
+                if '-' in s:
+                    lo, hi = s.split('-', 1)
+                    return int(lo.strip()) <= value <= int(hi.strip())
+                return value == int(s)
+            except ValueError:
+                return False
+        return True
 
     # ------------------------------------------------------------------
     # Fast chord dismissal
@@ -544,28 +758,27 @@ class BankSet:
 
     @staticmethod
     def _is_fast_chord(fk):
-        """Return True if all keys in the chord frozenset are CC keys.
+        """Return True if all keys in the chord frozenset are CC or NOTE keys.
 
-        Fast chords require all members to be momentary CC buttons (sending
-        CC=127 on press, CC=0 on release).  When any member's release arrives
-        before the chord is complete, the chord window is cancelled immediately
-        and the fallback individual dispatch fires with near-zero latency.
+        Fast chords require all members to send a release signal (CC=0 or
+        NoteOff).  When any member's release arrives before the chord is
+        complete, the window is cancelled immediately and the fallback
+        individual dispatch fires with near-zero latency.
         """
-        return all(k.startswith("CC") for k in fk)
+        return all(k.startswith("CC") or k.startswith("NOTE") for k in fk)
 
-    def _maybe_dismiss_fast_chord(self, key, bank_name, bank):
+    def _maybe_dismiss_fast_chord(self, key, bank_name, bank, release_event):
         """
         Check whether key is a member of any pending fast chord.  If so,
-        cancel the chord window and collect fallback events immediately.
+        cancel the chord window and collect fallback events.
 
-        Returns a list of events to emit (may be empty) if a fast chord
-        was dismissed, or None if no fast chord was pending for this key.
+        release_event is the CC=0 or NoteOff event that triggered the
+        dismissal.  For gesture keys it is used to complete both the press
+        and release in one step, since the release is consumed here and
+        will not arrive again.
 
-        Events are returned rather than fired via _output_fn because this
-        method is called synchronously from within handle(), which is the
-        mididings event callback.  Calling engine.output_event() from
-        within that callback causes a deadlock; only timer callbacks
-        (running in separate threads) may safely call _output_fn directly.
+        Returns a list of events (may be empty) if a fast chord was
+        dismissed, or None if no fast chord was pending for this key.
         """
         chord_members = self._chord_members.get(bank_name, {})
         if key not in chord_members:
@@ -584,6 +797,18 @@ class BankSet:
             self._chord_pending.pop(fk)
             dismissed = True
 
+            # Cancel any other pending chord windows sharing keys with
+            # this one -- those keys are consumed by the dismissal.
+            for other_fk in list(self._chord_pending.keys()):
+                if other_fk & fk:
+                    other = self._chord_pending.pop(other_fk)
+                    other["timer"].cancel()
+                    if self._debug:
+                        print(
+                            f"[chord:{self.name}] fast dismissal cancelled "
+                            f"overlapping window {set(other_fk)}"
+                        )
+
             if self._debug:
                 print(
                     f"[chord:{self.name}] fast chord {set(fk)} dismissed "
@@ -594,7 +819,6 @@ class BankSet:
             for k, ev in pending["events"].items():
                 etype = self._entry_types.get((bank_name, k))
                 if etype is None:
-                    # Not individually mapped -- pass through original event.
                     immediate.append(ev)
                 elif etype == "direct":
                     result = self._execute_sequence(bank[k], ev)
@@ -604,17 +828,43 @@ class BankSet:
                     result = self._handle_toggle(k, bank[k], ev)
                     if result:
                         immediate.extend(result)
-                elif etype == "longpress":
-                    # Back-date timestamp so hold duration is measured from
-                    # the original press, not the dismissal time.
-                    self._lp_starts[k] = pending["press_times"][k]
-                elif etype == "multipress":
-                    # Timer-based; safe to schedule from here.
-                    self._handle_multipress(k, bank[k], ev)
+                elif etype == "gesture":
+                    # We have both the stored press event (ev) and the
+                    # release event that triggered the dismissal.  Handle
+                    # both in sequence: set press state with back-dated
+                    # time, then process the release immediately.
+                    self._gesture_counts[k] = \
+                        self._gesture_counts.get(k, 0) + 1
+                    self._gesture_press_time[k] = pending["press_times"][k]
+                    self._gesture_events[k]     = ev
+                    result = self._handle_gesture_release(
+                        k, bank[k], release_event
+                    )
+                    if result:
+                        immediate.extend(result)
 
         if dismissed:
-            return immediate  # may be [] if nothing to emit
+            return immediate
         return None
+
+    def _dispatch_fallback_key(self, k, ev, press_times):
+        """Dispatch a single key individually as a chord fallback."""
+        bank_name = self.active_bank
+        bank      = self.banks[bank_name]
+        etype     = self._entry_types.get((bank_name, k))
+        if etype is None:
+            self._output_fn(ev)
+        elif etype == "direct":
+            self._fire_sequence(bank[k], ev)
+        elif etype == "toggle":
+            result = self._handle_toggle(k, bank[k], ev)
+            if result:
+                for ev_out in result:
+                    self._output_fn(ev_out)
+        elif etype == "gesture":
+            self._fire_sequence_gesture_fallback(
+                k, bank[k], ev, press_times.get(k)
+            )
 
     # ------------------------------------------------------------------
     # Chord
@@ -623,21 +873,13 @@ class BankSet:
     def _handle_chord_arrival(self, key, chord_key_sets, bank, event):
         """
         Called when a key that participates in at least one chord arrives.
-        chord_key_sets is a list of frozensets, one per chord definition
-        this key belongs to.
 
-        Standard chords (any non-CC member): wait for chord_window_ms.
-        If all keys arrive before the timer fires the chord dispatches
-        immediately.  If the timer fires with an incomplete set, each
-        arrived key is dispatched individually as a fallback.
+        Standard chords (any non-CC/NOTE member): wait for chord_window_ms.
+        Fast chords (all CC or NOTE members): _maybe_dismiss_fast_chord
+        cancels the window early on any member release.
 
-        Fast chords (all CC members): the window timer still starts here,
-        but _maybe_dismiss_fast_chord cancels it early when any member's
-        CC=0 release arrives, giving near-zero latency for the fallback.
-
-        Note: keys that are longpress type have their press timestamp
-        back-dated to the original arrival time in the fallback, compensating
-        for time spent waiting in the chord window.
+        If the window expires with an incomplete set, each arrived key is
+        dispatched individually as a fallback.
         """
         for fk in chord_key_sets:
             pending = self._chord_pending.get(fk)
@@ -655,30 +897,33 @@ class BankSet:
                                 f"incomplete {set(fk_)}, dispatching "
                                 f"{dropped['arrived']} individually"
                             )
+                        # Cancel overlapping windows and collect their keys
+                        # to avoid dispatching the same key twice.
+                        already_dispatched = set()
+                        for other_fk in list(self._chord_pending.keys()):
+                            if other_fk & fk_:
+                                other = self._chord_pending.pop(other_fk)
+                                other["timer"].cancel()
+                                # Keys in the other window that are NOT in
+                                # this one would be orphaned -- dispatch them.
+                                for k, ev in other["events"].items():
+                                    if k not in dropped["events"]:
+                                        already_dispatched.add(k)
+                                        self._dispatch_fallback_key(
+                                            k, ev, other["press_times"]
+                                        )
+                                if self._debug:
+                                    print(
+                                        f"[chord:{self.name}] expiry cancelled "
+                                        f"overlapping window {set(other_fk)}"
+                                    )
                         bank_ = self.banks[self.active_bank]
                         for k, ev in dropped["events"].items():
-                            etype = self._entry_types.get(
-                                (self.active_bank, k)
+                            if k in already_dispatched:
+                                continue
+                            self._dispatch_fallback_key(
+                                k, ev, dropped["press_times"]
                             )
-                            if etype is None:
-                                # Not individually mapped -- pass through.
-                                self._output_fn(ev)
-                            elif etype == "direct":
-                                self._fire_sequence(bank_[k], ev)
-                            elif etype == "toggle":
-                                result = self._handle_toggle(
-                                    k, bank_[k], ev
-                                )
-                                if result:
-                                    for ev_out in result:
-                                        self._output_fn(ev_out)
-                            elif etype == "longpress":
-                                # Back-date the timestamp to the original
-                                # press time so the hold duration is measured
-                                # correctly when the CC=0 release arrives.
-                                self._lp_starts[k] = dropped["press_times"][k]
-                            elif etype == "multipress":
-                                self._handle_multipress(k, bank_[k], ev)
                     return expire
 
                 t = threading.Timer(
@@ -711,20 +956,46 @@ class BankSet:
                             entry = bank[k]
                             break
                     if entry is None:
-                        return
+                        return None
 
                     if self._debug:
                         print(f"[chord:{self.name}] complete: {set(fk)}")
 
-                    # Record all chord keys as consumed so their CC=0
-                    # releases are suppressed in handle().
+                    # Cancel any other pending chord windows that share
+                    # keys with this chord -- those keys are now consumed
+                    # and must not be dispatched as fallbacks.
+                    for other_fk in list(self._chord_pending.keys()):
+                        if other_fk & fk:  # non-empty intersection
+                            other = self._chord_pending.pop(other_fk)
+                            other["timer"].cancel()
+                            if self._debug:
+                                print(
+                                    f"[chord:{self.name}] cancelled "
+                                    f"overlapping window {set(other_fk)}"
+                                )
+
+                    # Record chord keys as consumed so releases are suppressed.
                     self._chord_consumed.update(fk)
 
-                    # Return the sequence events to handle() so mididings
-                    # receives them directly.  Do NOT call _fire_sequence
-                    # here -- that calls _output_fn (engine.output_event)
-                    # synchronously from within the mididings callback,
-                    # which causes a deadlock.
+                    # Return events directly to handle() -- do NOT call
+                    # _output_fn here (deadlock risk in mididings callback).
                     if "single" in entry:
                         return self._execute_sequence(entry["single"], event)
                     return []
+
+        return None
+
+    def _fire_sequence_gesture_fallback(self, key, entry, event, press_time):
+        """
+        Dispatch a gesture entry from a chord fallback timer callback.
+        Back-dates the press time if 'long' is defined so hold duration
+        is measured from the original press, not the chord window expiry.
+        """
+        result = self._handle_gesture_press(key, entry, event)
+        if result:
+            for ev_out in result:
+                self._output_fn(ev_out)
+        # Back-date after _handle_gesture_press sets it to time.time()
+        if press_time is not None and "long" in entry and \
+           key in self._gesture_press_time:
+            self._gesture_press_time[key] = press_time
