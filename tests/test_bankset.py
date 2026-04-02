@@ -634,6 +634,94 @@ class TestGestureInsideFastChord:
 
 
 # ---------------------------------------------------------------------------
+# Chord multi-press
+# ---------------------------------------------------------------------------
+
+class TestChordMultiPress:
+
+    def _make(self):
+        return make_bankset({
+            "default": {
+                ("CC1", "CC2"): {
+                    "single": [{"send": "CC10", "value": 127}],
+                    "double": [{"send": "CC11", "value": 127}],
+                    "triple": [{"send": "CC12", "value": 127}],
+                },
+            },
+        })
+
+    def _complete_chord(self, bs):
+        bs.handle(make_cc(1, value=127))
+        bs.handle(make_cc(2, value=127))
+
+    def test_single_chord_fires_via_timer(self, fake_timer):
+        bs, out = self._make()
+        self._complete_chord(bs)
+        assert len(fake_timer.active()) == 1
+        fake_timer.active()[0].fire()
+        assert len(out) == 1
+        assert out[0].ctrl == 10
+
+    def test_double_chord_fires_via_timer(self, fake_timer):
+        bs, out = self._make()
+        self._complete_chord(bs)
+        self._complete_chord(bs)
+        active = fake_timer.active()
+        assert len(active) == 1
+        active[0].fire()
+        assert len(out) == 1
+        assert out[0].ctrl == 11
+
+    def test_triple_chord_fires_via_timer(self, fake_timer):
+        bs, out = self._make()
+        self._complete_chord(bs)
+        self._complete_chord(bs)
+        self._complete_chord(bs)
+        fake_timer.active()[0].fire()
+        assert len(out) == 1
+        assert out[0].ctrl == 12
+
+    def test_unmapped_count_fires_nothing(self, fake_timer):
+        bs, out = self._make()
+        for _ in range(4):
+            self._complete_chord(bs)
+        fake_timer.active()[0].fire()
+        assert out == []
+
+    def test_single_only_chord_fires_immediately(self, fake_timer):
+        # Chord with only "single" and no double/triple: fires immediately
+        # via handle() return value, no multipress timer needed.
+        bs, out = make_bankset({
+            "default": {
+                ("CC1", "CC2"): {
+                    "single": [{"send": "CC10", "value": 127}],
+                },
+            },
+        })
+        bs.handle(make_cc(1, value=127))
+        result = bs.handle(make_cc(2, value=127))
+        assert result is not None
+        assert result[0].ctrl == 10
+        assert len(fake_timer.active()) == 0
+
+    def test_chord_double_bank_switch(self, fake_timer):
+        bs, out = make_bankset({
+            "default": {
+                ("CC1", "CC2"): {
+                    "single": [{"send": "BANK", "bank": "drums"}],
+                    "double": [{"send": "BANK", "bank": "ardour"}],
+                },
+            },
+            "drums":  {},
+            "ardour": {},
+        })
+        self._complete_chord(bs)
+        self._complete_chord(bs)
+        fake_timer.active()[0].fire()
+        assert bs.active_bank == "ardour"
+
+
+# ---------------------------------------------------------------------------
 # Bank switching
 # ---------------------------------------------------------------------------
 

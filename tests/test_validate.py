@@ -266,6 +266,15 @@ class TestStructuralErrors:
             },
         }}, "momentary input")
 
+    def test_long_in_chord_entry_caught(self):
+        # Chords have no individual release signal; 'long' is invalid.
+        assert_error({"default": {
+            ("CC1", "CC2"): {
+                "single": [{"send": "CC10", "value": 1}],
+                "long":   [{"send": "CC11", "value": 1}],
+            },
+        }}, "no individual release signal")
+
     def test_trigger_value_invalid_syntax(self):
         assert_error({"default": {
             "CC0": {

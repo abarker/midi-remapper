@@ -5,12 +5,71 @@ Mididings setup and event dispatch loop.  This is the only module in the
 package that imports mididings directly; it is never imported by the test
 suite.
 """
+import subprocess
+import sys
+
 from mididings import config as mididings_config, run as mididings_run, \
     Process, Output
 import mididings.engine as engine
 
 from midi_event_remapper import config
 from midi_event_remapper.midi import event_key
+
+
+def check_jack():
+    """
+    Verify that JACK is running before attempting to start mididings.
+
+    Uses jack_wait if available (cleanest check), otherwise falls back to
+    scanning the process list for jackd or pipewire-jack.  Exits with a
+    clear message if JACK is not found.
+    """
+    # Try jack_wait first -- it is purpose-built for this check.
+    try:
+        result = subprocess.run(
+            ["jack_wait", "-c", "-t", "1"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        if result.returncode == 0:
+            return  # JACK is running
+        print(
+            "\n[startup] ERROR: JACK does not appear to be running.\n"
+            "  Start JACK (via QjackCtl or 'jackd') before running this script.\n"
+        )
+        sys.exit(1)
+    except FileNotFoundError:
+        pass  # jack_wait not installed; fall through to process check
+
+    # Fallback: check for jackd or pipewire process names.
+    try:
+        out = subprocess.check_output(
+            ["pgrep", "-x", "-l", "jackd,jackdbus,pipewire"],
+            stderr=subprocess.DEVNULL,
+        ).decode()
+        if out.strip():
+            return  # found a matching process
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+
+    # Also accept pipewire-jack via pactl/pw-cli presence.
+    try:
+        out = subprocess.check_output(
+            ["pw-cli", "info", "all"],
+            stderr=subprocess.DEVNULL,
+            timeout=1,
+        ).decode()
+        if "jack" in out.lower():
+            return
+    except Exception:
+        pass
+
+    print(
+        "\n[startup] WARNING: Could not confirm JACK is running.\n"
+        "  If you see connection errors, start JACK before running this script.\n"
+        "  (Install jack_wait for a reliable check: 'apt install jackd2')\n"
+    )
+    # Warning only -- do not exit, in case the check is a false negative.
 
 
 def setup():
@@ -50,10 +109,14 @@ def main_handler(event):
 
 
 def run():
-    """Validate config, set up mididings, and start the event loop."""
+    """Validate config, check JACK, set up mididings, and start the loop."""
     if config.DEBUG:
         print("\nStarting midi_event_remapper.\n")
 
+    # Check JACK before anything else.
+    check_jack()
+
+    # Validate all BankSets.
     all_errors = []
     for bs in config.BANK_SETS:
         all_errors.extend(bs.validate())

@@ -110,6 +110,10 @@ class BankSet:
         #               "press_times": {key: float}}
         self._chord_pending  = {}
 
+        # Chord multi-press state
+        # frozenset -> {"count": int, "timer": Timer, "event": event}
+        self._chord_counts   = {}
+
         # Keys whose presses were consumed by a completed chord.
         # Their releases are suppressed to prevent them firing mappings
         # in whatever bank is active at release time.
@@ -143,7 +147,12 @@ class BankSet:
                 f"Available: {list(self.banks.keys())}"
             )
         if self._debug:
-            print(f"[BankSet:{self.name}] bank: {self.active_bank!r} -> {name!r}")
+            print(
+                f"\n{'='*50}\n"
+                f"  BankSet [{self.name}]  bank: "
+                f"{self.active_bank!r} -> {name!r}\n"
+                f"{'='*50}\n"
+            )
         self.active_bank = name
 
     def handle(self, event):
@@ -380,6 +389,11 @@ class BankSet:
                     if label in value:
                         check_sequence(value[label], f"{ctx}[{label!r}]")
             elif etype == "chord":
+                if "long" in value:
+                    errors.append(
+                        f"{ctx}: 'long' is not valid in a chord entry -- "
+                        f"chords have no individual release signal"
+                    )
                 for label in ("single", "double", "triple"):
                     if label in value:
                         check_sequence(value[label], f"{ctx}[{label!r}]")
@@ -977,6 +991,12 @@ class BankSet:
                     # Record chord keys as consumed so releases are suppressed.
                     self._chord_consumed.update(fk)
 
+                    # Check if entry has double/triple -- if so, accumulate.
+                    has_multi = "double" in entry or "triple" in entry
+                    if has_multi:
+                        self._handle_chord_multipress(fk, entry, event)
+                        return []
+
                     # Return events directly to handle() -- do NOT call
                     # _output_fn here (deadlock risk in mididings callback).
                     if "single" in entry:
@@ -984,6 +1004,37 @@ class BankSet:
                     return []
 
         return None
+
+    def _handle_chord_multipress(self, fk, entry, event):
+        """
+        Accumulate repeated completions of the same chord within
+        MULTI_PRESS_WINDOW_MS, then dispatch based on count.
+        Works like gesture multi-press but keyed on the chord frozenset.
+        Always dispatches via _output_fn (timer callback).
+        """
+        state = self._chord_counts.get(fk)
+        if state is None:
+            count = 1
+        else:
+            state["timer"].cancel()
+            count = state["count"] + 1
+
+        def fire(fk_=fk, entry_=entry, count_=count, ev_=event):
+            self._chord_counts.pop(fk_, None)
+            label = {1: "single", 2: "double", 3: "triple"}.get(count_)
+            if self._debug:
+                print(
+                    f"[chord:{self.name}] {set(fk_)} "
+                    f"count={count_} -> {label}"
+                )
+            if label and label in entry_:
+                self._fire_sequence(entry_[label], ev_)
+
+        t = threading.Timer(self._multi_press_window_ms / 1000.0, fire)
+        t.daemon = True
+        t.start()
+        self._chord_counts[fk] = {"count": count, "timer": t}
+        self._timer_list.append(t)
 
     def _fire_sequence_gesture_fallback(self, key, entry, event, press_time):
         """

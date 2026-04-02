@@ -16,7 +16,41 @@ Each bank is a flat dict.  The value shape determines the behaviour:
       single/double/triple/     single press, double/triple press,
       long                      and long hold.  Any combination is valid.
     Tuple key                -> chord: all keys must arrive within
-                                CHORD_WINDOW_MS
+                                CHORD_WINDOW_MS.  Supports single/double/
+                                triple just like gesture entries (see
+                                CHORD ENTRIES below).
+
+CHORD ENTRIES
+--------------
+A chord entry uses a tuple of event key strings as its dict key, and a
+dict value containing any subset of "single", "double", "triple":
+
+    ("CC1", "CC2"): {
+        "single": [{"send": "BANK", "bank": "drums"}],
+        "double": [{"send": "BANK", "bank": "ardour"}],
+    },
+
+"single" fires after one complete chord press within CHORD_WINDOW_MS.
+"double" fires after two chord presses within MULTI_PRESS_WINDOW_MS.
+"triple" fires after three chord presses within MULTI_PRESS_WINDOW_MS.
+"long" is NOT valid in chord entries (chords have no individual release
+signal); validate() will catch this at startup.
+
+CRITICAL -- DUPLICATE TUPLE KEYS:
+Python dicts silently discard duplicate keys.  If you define the same
+chord tuple twice, only the last entry survives:
+
+    ("CC1", "CC2"): {"single": [...]},  # WRONG: silently discarded!
+    ("CC1", "CC2"): {"double": [...]},  # only this survives
+
+Always combine all labels into a single entry:
+
+    ("CC1", "CC2"): {
+        "single": [...],
+        "double": [...],
+    },
+
+The same applies to any other repeated key in a bank dict.
 
 GESTURE ENTRIES
 ----------------
@@ -200,17 +234,17 @@ DEBUG                 = True
 # to engine.output_event on each BankSet before calling run().
 #
 
-#actition_banks = BankSet(
-#    name                  = "actition",
-#    active_bank           = "default",
-#    debug                 = DEBUG,
-#    data_offset           = DATA_OFFSET,
-#    debounce_ms           = DEBOUNCE_MS,
-#    multi_press_window_ms = MULTI_PRESS_WINDOW_MS,
-#    chord_window_ms       = CHORD_WINDOW_MS,
-#    long_press_ms         = LONG_PRESS_MS,
-    #banks = {
-        # "default": {
+actition_banks = BankSet(
+    name                  = "actition",
+    active_bank           = "default",
+    debug                 = DEBUG,
+    data_offset           = DATA_OFFSET,
+    debounce_ms           = DEBOUNCE_MS,
+    multi_press_window_ms = MULTI_PRESS_WINDOW_MS,
+    chord_window_ms       = CHORD_WINDOW_MS,
+    long_press_ms         = LONG_PRESS_MS,
+    banks = {
+        "default": {
             # Direct: single output (both press and release are forwarded)
             # "PC5": [{"send": "NOTE36", "velocity": 127}],
 
@@ -280,50 +314,6 @@ DEBUG                 = True
             #         {"send": "BANK", "bank": "drums"},
             #     ],
             # },
-
-        # "drums": {
-            # Chord -> switch back to default
-            # ("CC4", "CC5"): {
-            #     "single": [{"send": "BANK", "bank": "default"}],
-            # },
-
-            #("CC1", "CC2"): { "single": [{"send": "BANK", "bank": "default"}], },
-            #("CC2", "CC3"): { "single": [{"send": "BANK", "bank": "ardour"}], },
-
-            #"CC0": [{"send": "CC4", "press_only": True}],
-            #"CC1": [{"send": "CC5", "press_only": True}],
-            #"CC2": [{"send": "CC6", "press_only": True}],
-            #"CC3": [{"send": "CC7", "press_only": True}],
-         # },
-
-actition_banks = BankSet(
-    name                  = "actition",
-    active_bank           = "default",
-    debug                 = DEBUG,
-    data_offset           = DATA_OFFSET,
-    debounce_ms           = DEBOUNCE_MS,
-    multi_press_window_ms = MULTI_PRESS_WINDOW_MS,
-    chord_window_ms       = CHORD_WINDOW_MS,
-    long_press_ms         = LONG_PRESS_MS,
-    banks = {
-        "default": {
-
-            ("CC1", "CC2"): { "single": [{"send": "BANK", "bank": "drums"}], },
-            ("CC2", "CC3"): { "single": [{"send": "BANK", "bank": "ardour"}], },
-
-            "CC0": [{"send": "CC0", "press_only": True}],
-            "CC1": [{"send": "CC1", "press_only": True}],
-            "CC2": [{"send": "CC2", "press_only": True}],
-            "CC3": [{"send": "CC3", "press_only": True}],
-
-            "CC1": {
-                "single":  [{"send": "CC1", "value": 127}],
-                "double":  [{"send": "CC11", "value": 127}],
-                "triple":  [{"send": "CC22", "value": 127}],
-                "long":    [{"send": "PC88"}],
-                "long_ms": 300,
-            },
-
         },
 
         "drums": {
@@ -331,24 +321,6 @@ actition_banks = BankSet(
             # ("CC4", "CC5"): {
             #     "single": [{"send": "BANK", "bank": "default"}],
             # },
-
-            ("CC1", "CC2"): { "single": [{"send": "BANK", "bank": "default"}], },
-            ("CC2", "CC3"): { "single": [{"send": "BANK", "bank": "ardour"}], },
-
-            "CC0": [{"send": "CC4", "press_only": True}],
-            "CC1": [{"send": "CC5", "press_only": True}],
-            "CC2": [{"send": "CC6", "press_only": True}],
-            "CC3": [{"send": "CC7", "press_only": True}],
-         },
-
-        "ardour": {
-            ("CC2", "CC3"): { "single": [{"send": "BANK", "bank": "default"}], },
-            ("CC1", "CC2"): { "single": [{"send": "BANK", "bank": "drums"}], },
-
-            "CC0": [{"send": "PC4", "press_only": True}],
-            "CC1": [{"send": "PC5", "press_only": True}],
-            "CC2": [{"send": "PC6", "press_only": True}],
-            "CC3": [{"send": "PC7", "press_only": True}],
         },
     },
 )
