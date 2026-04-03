@@ -12,13 +12,138 @@ Each bank is a flat dict.  The value shape determines the behaviour:
 
     List value               -> direct: fires immediately, no state
     Dict with a / b          -> toggle: alternates between two sequences
-    Dict with any of         -> gesture: unified handler covering all of:
-      single/double/triple/     single press, double/triple press,
-      long                      and long hold.  Any combination is valid.
+    Dict with any of         -> gesture: unified handler covering single
+      single/double/triple/     press, double/triple press, and long hold.
+      long                      Any combination is valid.
     Tuple key                -> chord: all keys must arrive within
                                 CHORD_WINDOW_MS.  Supports single/double/
-                                triple just like gesture entries (see
-                                CHORD ENTRIES below).
+                                triple (see CHORD ENTRIES below).
+
+DIRECT vs GESTURE SINGLE -- WHICH TO USE?
+-------------------------------------------
+Direct and gesture-single may look similar but behave differently:
+
+    DIRECT  "CC0": [{"send": "CC4"}]
+        - Fires on BOTH press (CC=127) and release (CC=0).
+        - The incoming value is forwarded unchanged by default, so the
+          downstream device sees both the press and release signal.
+        - Use "press_only": True to suppress the release.
+        - Use "value": 127 to always send a fixed value.
+        - Zero latency on press and release.
+        - Best for: transparent CC remapping where you want the full
+          press/release pair forwarded to the downstream device.
+
+    GESTURE SINGLE  "CC0": {"single": [{"send": "CC4", "value": 127}]}
+        - Fires on PRESS only; release is always suppressed.
+        - You must specify "value" explicitly -- gesture sequences fire
+          in response to the press event, so the value is always 127.
+        - Zero latency (same as direct when no other labels defined).
+        - Best for: press-only triggers, or when you plan to add
+          "double"/"long" later without restructuring the entry.
+
+    The latency of both is identical when only "single" is defined.
+    The key difference is press-only vs press+release forwarding.
+
+LATENCY GUIDE
+--------------
+Each feature type has different latency characteristics.  "Latency" here
+means the delay between the physical button press and the output event.
+
+    ZERO latency (fires immediately on press):
+        Direct mapping
+        Gesture with only "single" defined
+        Toggle
+        Chord completion (all keys arrived within CHORD_WINDOW_MS)
+
+    CHORD_WINDOW_MS latency (default 80ms):
+        Any key that is a member of a chord -- the press is held until
+        either the chord completes or the window expires.
+        Keys in fast chords (all CC/NOTE members) get near-zero latency
+        on fallback because the window is cancelled on release.
+        Keys in standard chords (any PC member) always wait the full
+        CHORD_WINDOW_MS on fallback.
+
+    MULTI_PRESS_WINDOW_MS latency (default 300ms):
+        Gesture with "double" or "triple" defined -- every press waits
+        for the window to expire before dispatching, including single
+        presses.  If this latency is noticeable, reduce
+        MULTI_PRESS_WINDOW_MS or consider using "long" instead of
+        "double" for two-action keys (long has zero latency on press).     ????? true?  not really zero latency but close
+        Chord with "double" or "triple" defined -- same window applies
+        to the first chord completion.
+
+    Hold-duration latency (zero to LONG_PRESS_MS, default 500ms):
+        Gesture with "long" defined -- the "long" action fires as soon
+        as the hold threshold is reached (no need to release first).
+        The "single" action fires on quick release.  Net latency for
+        "single" is the physical hold duration, which is under user
+        control.  Net latency for "long" is exactly long_ms.
+
+    SUMMARY TABLE:
+        Feature             | When output fires          | Latency
+        --------------------|----------------------------|------------------
+        Direct              | Immediately on press       | ~0ms
+        Gesture single-only | Immediately on press       | ~0ms
+        Toggle              | Immediately on press       | ~0ms
+        Chord (complete)    | When last key arrives      | ~0ms
+        Chord (fallback)    | After CHORD_WINDOW_MS      | 80ms (default)
+        Fast chord fallback | On key release             | ~0ms               # key release not really zero latency but close??
+        Gesture multi-press | After MULTI_PRESS_WINDOW_MS| 300ms (default)
+        Gesture long        | At long_ms threshold       | long_ms (hold)
+        Gesture single+long | On quick release           | hold duration
+        Chord multi-press   | After MULTI_PRESS_WINDOW_MS| 300ms (default)
+
+GESTURE ENTRIES
+----------------
+A gesture entry is a dict containing any subset of:
+
+    "single"  -- sequence fired on a single press (or quick tap if 'long'
+                 is also defined); fires immediately if no other labels
+                 are defined alongside it
+    "double"  -- sequence fired on two presses within MULTI_PRESS_WINDOW_MS
+    "triple"  -- sequence fired on three presses within MULTI_PRESS_WINDOW_MS
+    "long"    -- sequence fired at long_ms threshold (fires immediately
+                 when threshold is reached, before release).  Requires a
+                 momentary input (CC or NOTE); NOT valid for PC keys.
+    "long_ms" -- per-key long-press threshold in ms (default: LONG_PRESS_MS)
+    "trigger_value" -- only dispatch when the incoming event value matches      # value OR note????
+                 (see TRIGGER VALUE below)
+
+When 'long' is defined alongside 'double'/'triple', the multipress window
+starts on quick release (not on press), so long and multi compose cleanly.
+
+Examples:
+
+    # Immediate single action (no delay, press-only)
+    "CC0": {"single": [{"send": "CC10", "value": 127}]},
+
+    # Long press: tap vs hold (long fires at threshold, no release needed)
+    "CC0": {
+        "single": [{"send": "CC10", "value": 127}],
+        "long":   [{"send": "PC80"}],
+        "long_ms": 300,
+    },
+
+    # Multi-press (incurs MULTI_PRESS_WINDOW_MS delay on every press)
+    "CC0": {
+        "single": [{"send": "CC10", "value": 127}],
+        "double": [{"send": "CC20", "value": 127}],
+        "triple": [{"send": "CC30", "value": 127}],
+    },
+
+    # Combined: long + multi (multipress window starts after quick release)
+    "CC0": {
+        "single": [{"send": "CC10", "value": 127}],
+        "double": [{"send": "CC20", "value": 127}],
+        "long":   [{"send": "PC80"}],
+        "long_ms": 300,
+    },
+
+    # Same for NOTE keys
+    "NOTE60": {
+        "single": [{"send": "CC10", "value": 127}],
+        "long":   [{"send": "CC11", "value": 127}],
+    },
 
 CHORD ENTRIES
 --------------
@@ -36,6 +161,13 @@ dict value containing any subset of "single", "double", "triple":
 "long" is NOT valid in chord entries (chords have no individual release
 signal); validate() will catch this at startup.
 
+Fast vs standard chord (affects fallback latency only):
+    Fast chord   -- ALL members are CC or NOTE keys: any member's release
+                    cancels the chord window immediately, so a solo press
+                    of a chord member falls back with near-zero latency.
+    Standard chord -- any PC member: always waits CHORD_WINDOW_MS before
+                    falling back when the chord is incomplete.
+
 CRITICAL -- DUPLICATE TUPLE KEYS:
 Python dicts silently discard duplicate keys.  If you define the same
 chord tuple twice, only the last entry survives:
@@ -50,61 +182,7 @@ Always combine all labels into a single entry:
         "double": [...],
     },
 
-The same applies to any other repeated key in a bank dict.
-
-GESTURE ENTRIES
-----------------
-A gesture entry is a dict containing any subset of:
-
-    "single"  -- sequence fired on a single press (or quick tap if 'long'
-                 is also defined)
-    "double"  -- sequence fired on two presses within MULTI_PRESS_WINDOW_MS
-    "triple"  -- sequence fired on three presses within MULTI_PRESS_WINDOW_MS
-    "long"    -- sequence fired when held past long_ms threshold.
-                 Requires a momentary input (CC or NOTE) that sends a
-                 release signal.  NOT valid for PC keys (no release signal).
-    "long_ms" -- per-key long-press threshold in ms (default: LONG_PRESS_MS)
-    "trigger_value" -- only dispatch when the incoming event value matches
-                 (see TRIGGER VALUE below)
-
-When 'long' is defined, 'single' behaves as a tap (fired on quick release).
-When only 'single' is defined with no 'long' or multi variants, it fires
-immediately on press with no timing delay.
-When 'double' or 'triple' is defined, every press incurs a
-MULTI_PRESS_WINDOW_MS delay before dispatching.
-
-Examples:
-
-    # Immediate single action (no delay)
-    "CC0": {"single": [{"send": "CC10", "value": 127}]},
-
-    # Long press: tap vs hold
-    "CC0": {
-        "single": [{"send": "CC10", "value": 127}],
-        "long":   [{"send": "PC80"}],
-        "long_ms": 300,
-    },
-
-    # Multi-press (incurs MULTI_PRESS_WINDOW_MS delay)
-    "CC0": {
-        "single": [{"send": "CC10", "value": 127}],
-        "double": [{"send": "CC20", "value": 127}],
-        "triple": [{"send": "CC30", "value": 127}],
-    },
-
-    # Combined: long + multi
-    "CC0": {
-        "single": [{"send": "CC10", "value": 127}],
-        "double": [{"send": "CC20", "value": 127}],
-        "long":   [{"send": "PC80"}],
-        "long_ms": 300,
-    },
-
-    # Same for NOTE keys
-    "NOTE60": {
-        "single": [{"send": "CC10", "value": 127}],
-        "long":   [{"send": "CC11", "value": 127}],
-    },
+The same applies to any other repeated string key in a bank dict.
 
 TRIGGER VALUE
 --------------
@@ -117,10 +195,13 @@ when the incoming event's data value matches a filter:
     "trigger_value": "<64"          # less than
     "trigger_value": ">=64"         # greater than or equal
     "trigger_value": "<=64"         # less than or equal
-    "trigger_value": [0, "64-127"]  # list: OR logic
+    "trigger_value": [1, "64-127"]  # list: OR logic (avoid 0: CC release)
 
-If the incoming value does not match, the event passes through unchanged
-(not dropped -- use an empty sequence [] to drop explicitly).
+If the incoming value does not match, the event passes through unchanged.
+Use an empty sequence [] to drop it instead.
+
+Note: "trigger_value": 0 is ambiguous for CC keys because CC=0 is also
+the release signal.  For value-0 matching, use NOTE or PC keys instead.
 
 SEQUENCE ITEM FORMAT
 ---------------------
@@ -134,14 +215,15 @@ Each sequence is a list of dicts.  Required key: "send".
         "value"      -- CC value 0-127, for CC sends.
                         If omitted, the incoming event's value is passed
                         through unchanged.  Useful for direct remaps where
-                        you want both press and release forwarded.
-                        Specify explicitly for gesture sequences where the
-                        triggering event is a release (value=0):
+                        you want both press and release forwarded:
+                            "CC0": [{"send": "CC4"}]  # forwards 127 and 0
+                        Specify explicitly in gesture sequences (which fire
+                        on press, not release):
                             "single": [{"send": "CC4", "value": 127}]
         "velocity"   -- note velocity 0-127, for NOTE sends (default 127)
         "note_off"   -- send NoteOff instead of NoteOn      (default False)
         "press_only" -- if True, skip this item on CC=0 or NoteOff release.
-                        Only meaningful for direct mappings where both
+                        Only meaningful for DIRECT mappings where both
                         press and release reach the sequence.
                         Not needed in gesture/toggle sequences (releases
                         are automatically suppressed for those types).
@@ -170,7 +252,8 @@ For NOTE events, momentary means NoteOn on press and NoteOff on release.
 
 Requires momentary:
     Gesture 'long' action
-        Press timestamp is recorded; action dispatches on release.
+        Press timestamp is recorded on CC=127/NoteOn; the long threshold
+        timer fires at long_ms and the release is then suppressed.
         PC keys have no release signal and will be caught by validate().
 
     Fast chord -- tuple key where ALL members are CC or NOTE keys
@@ -234,9 +317,119 @@ DEBUG                 = True
 # to engine.output_event on each BankSet before calling run().
 #
 
+# actition_banks = BankSet(
+#     name                  = "actition",
+#     active_bank           = "default",
+#     debug                 = DEBUG,
+#     data_offset           = DATA_OFFSET,
+#     debounce_ms           = DEBOUNCE_MS,
+#     multi_press_window_ms = MULTI_PRESS_WINDOW_MS,
+#     chord_window_ms       = CHORD_WINDOW_MS,
+#     long_press_ms         = LONG_PRESS_MS,
+#     banks = {
+#         "default": {
+#             # Direct: single output (both press and release are forwarded)
+#             # "PC5": [{"send": "NOTE36", "velocity": 127}],
+#
+#             # Direct: single output, press only (release suppressed)
+#             # "CC5": [{"send": "CC10", "press_only": True}],
+#
+#             # Direct: multiple outputs
+#             # "PC6": [
+#             #     {"send": "NOTE38", "velocity": 127},
+#             #     {"send": "CC10",   "value": 64},
+#             # ],
+#
+#             # Toggle
+#             # "CC22": {
+#             #     "a": [{"send": "CC40", "value": 127}],
+#             #     "b": [{"send": "CC40", "value": 0}],
+#             # },
+#
+#             # Gesture: single only -- fires immediately, no delay
+#             # "PC4": {
+#             #     "single": [{"send": "CC10", "value": 127}],
+#             # },
+#
+#             # Gesture: multi-press -- incurs MULTI_PRESS_WINDOW_MS delay
+#             # "PC4": {
+#             #     "single": [{"send": "CC10", "value": 127}],
+#             #     "double": [{"send": "CC11", "value": 127}],
+#             #     "triple": [{"send": "CC12", "value": 127}],
+#             # },
+#
+#             # Gesture: long press (momentary CC or NOTE only)
+#             # "CC30": {
+#             #     "single":  [{"send": "CC10", "value": 127}],
+#             #     "long":    [{"send": "PC1"}],
+#             #     "long_ms": 400,   # optional per-key override
+#             # },
+#
+#             # Gesture: combined long + multi-press
+#             # "CC30": {
+#             #     "single":  [{"send": "CC10", "value": 127}],
+#             #     "double":  [{"send": "CC11", "value": 127}],
+#             #     "long":    [{"send": "PC1"}],
+#             #     "long_ms": 400,
+#             # },
+#
+#             # Gesture: trigger only on specific value or range
+#             # "CC30": {
+#             #     "trigger_value": "64-127",
+#             #     "single": [{"send": "CC10", "value": 127}],
+#             # },
+#
+#             # Note on + note off after delay
+#             # "NOTE61": [
+#             #     {"send": "NOTE36"},
+#             #     {"send": "NOTE36", "note_off": True, "delay": 0.25},
+#             # ],
+#
+#             # Chord -> bank switch (fast chord: all CC keys)
+#             # ("CC4", "CC5"): {
+#             #     "single": [{"send": "BANK", "bank": "drums"}],
+#             # },
+#
+#             # Chord -> bank switch + additional outputs (standard chord: PC keys)
+#             # ("PC4", "PC5"): {
+#             #     "single": [
+#             #         {"send": "CC40", "value": 0},
+#             #         {"send": "BANK", "bank": "drums"},
+#             #     ],
+#             # },
+#         },
+#
+#         "drums": {
+#             # Chord -> switch back to default
+#             # ("CC4", "CC5"): {
+#             #     "single": [{"send": "BANK", "bank": "default"}],
+#             # },
+#         },
+#     },
+# )
+#
+# # A BankSet with a single bank that never switches, useful for mappings
+# # that should always be active regardless of other BankSets' states.
+# global_banks = BankSet(
+#     name                  = "global",
+#     active_bank           = "default",
+#     debug                 = DEBUG,
+#     data_offset           = DATA_OFFSET,
+#     debounce_ms           = DEBOUNCE_MS,
+#     multi_press_window_ms = MULTI_PRESS_WINDOW_MS,
+#     chord_window_ms       = CHORD_WINDOW_MS,
+#     long_press_ms         = LONG_PRESS_MS,
+#     banks = {
+#         "default": {
+#             # Entries here are checked before actition_banks on every event.
+#         },
+#     },
+# )
+
+
 actition_banks = BankSet(
     name                  = "actition",
-    active_bank           = "default",
+    active_bank           = "drums",
     debug                 = DEBUG,
     data_offset           = DATA_OFFSET,
     debounce_ms           = DEBOUNCE_MS,
@@ -244,76 +437,29 @@ actition_banks = BankSet(
     chord_window_ms       = CHORD_WINDOW_MS,
     long_press_ms         = LONG_PRESS_MS,
     banks = {
-        "default": {
-            # Direct: single output (both press and release are forwarded)
-            # "PC5": [{"send": "NOTE36", "velocity": 127}],
+        "sooperlooper": {
 
-            # Direct: single output, press only (release suppressed)
-            # "CC5": [{"send": "CC10", "press_only": True}],
+            #("CC1", "CC2"): { "single": [{"send": "BANK", "bank": "drums"}], },
+            #("CC2", "CC3"): { "single": [{"send": "BANK", "bank": "ardour"}], },
 
-            # Direct: multiple outputs
-            # "PC6": [
-            #     {"send": "NOTE38", "velocity": 127},
-            #     {"send": "CC10",   "value": 64},
-            # ],
+            ("CC1", "CC2"): {
+                "single": [{"send": "BANK", "bank": "drums"}],
+                #"double": [{"send": "BANK", "bank": "ardour"}],
+            },
 
-            # Toggle
-            # "CC22": {
-            #     "a": [{"send": "CC40", "value": 127}],
-            #     "b": [{"send": "CC40", "value": 0}],
-            # },
+            "CC0": [{"send": "CC0", "press_only": True}],
+            "CC1": [{"send": "CC1", "press_only": True}],
+            "CC2": [{"send": "CC2", "press_only": True}],
+            "CC3": [{"send": "CC3", "press_only": True}],
 
-            # Gesture: single only -- fires immediately, no delay
-            # "PC4": {
-            #     "single": [{"send": "CC10", "value": 127}],
-            # },
+            #"CC1": { # NOTE: These are dicts and latest key overwrites!!!!
+            #    "single":  [{"send": "CC1", "value": 127}],
+            #    "double":  [{"send": "CC11", "value": 127}],
+            #    "triple":  [{"send": "CC22", "value": 127}],
+            #    "long":    [{"send": "PC88"}],
+            #    "long_ms": 300,
+            #},
 
-            # Gesture: multi-press -- incurs MULTI_PRESS_WINDOW_MS delay
-            # "PC4": {
-            #     "single": [{"send": "CC10", "value": 127}],
-            #     "double": [{"send": "CC11", "value": 127}],
-            #     "triple": [{"send": "CC12", "value": 127}],
-            # },
-
-            # Gesture: long press (momentary CC or NOTE only)
-            # "CC30": {
-            #     "single":  [{"send": "CC10", "value": 127}],
-            #     "long":    [{"send": "PC1"}],
-            #     "long_ms": 400,   # optional per-key override
-            # },
-
-            # Gesture: combined long + multi-press
-            # "CC30": {
-            #     "single":  [{"send": "CC10", "value": 127}],
-            #     "double":  [{"send": "CC11", "value": 127}],
-            #     "long":    [{"send": "PC1"}],
-            #     "long_ms": 400,
-            # },
-
-            # Gesture: trigger only on specific value or range
-            # "CC30": {
-            #     "trigger_value": "64-127",
-            #     "single": [{"send": "CC10", "value": 127}],
-            # },
-
-            # Note on + note off after delay
-            # "NOTE61": [
-            #     {"send": "NOTE36"},
-            #     {"send": "NOTE36", "note_off": True, "delay": 0.25},
-            # ],
-
-            # Chord -> bank switch (fast chord: all CC keys)
-            # ("CC4", "CC5"): {
-            #     "single": [{"send": "BANK", "bank": "drums"}],
-            # },
-
-            # Chord -> bank switch + additional outputs (standard chord: PC keys)
-            # ("PC4", "PC5"): {
-            #     "single": [
-            #         {"send": "CC40", "value": 0},
-            #         {"send": "BANK", "bank": "drums"},
-            #     ],
-            # },
         },
 
         "drums": {
@@ -321,6 +467,31 @@ actition_banks = BankSet(
             # ("CC4", "CC5"): {
             #     "single": [{"send": "BANK", "bank": "default"}],
             # },
+
+            ("CC1", "CC2"): { "single": [{"send": "BANK", "bank": "sooperlooper"}], },
+            #("CC2", "CC3"): { "single": [{"send": "BANK", "bank": "ardour"}], },
+
+            "CC0": [{"send": "CC4", "press_only": True}],
+            #"CC1": [{"send": "CC5", "press_only": True}],
+            #"CC2": [{"send": "CC6", "press_only": True}],
+            "CC1": { "single": [{"send": "CC5", "value": 127}],
+                     "double": [{"send": "CC25", "value": 127}],
+                     "triple": [{"send": "CC105", "value": 127}], },
+            "CC2": { "single": [{"send": "CC6", "value": 127}],
+                     "double": [{"send": "CC26", "value": 127}],
+                     "triple": [{"send": "CC106", "value": 127}], },
+            "CC3": [{"send": "CC7", "press_only": True}],
+         },
+
+        "ardour": {
+            ("CC2", "CC3"): { "single": [{"send": "BANK", "bank": "sooperlooper"}], },
+            #("CC2", "CC3"): { "double": [{"send": "BANK", "bank": "drums"}], },
+            #("CC1", "CC2"): { "single": [{"send": "BANK", "bank": "drums"}], },
+
+            "CC0": [{"send": "PC4", "press_only": True}],
+            "CC1": [{"send": "PC5", "press_only": True}],
+            "CC2": [{"send": "PC6", "press_only": True}],
+            "CC3": [{"send": "PC7", "press_only": True}],
         },
     },
 )
@@ -342,5 +513,6 @@ global_banks = BankSet(
         },
     },
 )
+
 
 BANK_SETS = [global_banks, actition_banks]

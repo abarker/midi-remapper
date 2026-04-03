@@ -128,11 +128,26 @@ def run():
     elif config.DEBUG:
         print("[startup] All BankSets validated OK.\n")
 
-    setup()
+    try:
+        setup()
+    except Exception as e:
+        print(
+            f"\n[startup] ERROR: Failed to connect to JACK.\n"
+            f"  {e}\n\n"
+            f"  Make sure JACK is running before starting this script.\n"
+            f"  Start it with QjackCtl or: jackd -d alsa\n"
+        )
+        sys.exit(1)
 
-    mididings_run(
-        Process(main_handler) >>
-        Output(port=config.PORT_INDEX, channel=config.CHANNEL)
-    )
+    try:
+        mididings_run(
+            Process(main_handler) >>
+            Output(port=config.PORT_INDEX, channel=config.CHANNEL)
+        )
+    except KeyboardInterrupt:
+        pass  # clean Ctrl-C exit, message printed below
+    except Exception as e:
+        print(f"\n[runtime] ERROR: {e}\n")
+        sys.exit(1)
 
     print("\nExiting midi_event_remapper.")
