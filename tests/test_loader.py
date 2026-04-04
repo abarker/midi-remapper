@@ -79,7 +79,8 @@ class TestLoadBanksetFile:
             },
         }
         ''')
-        bs = load_bankset_file(path)
+        result = load_bankset_file(path)
+        bs = result[0]
         assert bs.name == "test"
         assert bs.active_bank == "default"
 
@@ -92,7 +93,8 @@ class TestLoadBanksetFile:
         # Rename to a known stem
         named = path.parent / "mycontroller.mer"
         path.rename(named)
-        bs = load_bankset_file(named)
+        result = load_bankset_file(named)
+        bs = result[0]
         assert bs.name == "mycontroller"
 
     def test_chord_keys_converted(self):
@@ -106,7 +108,8 @@ class TestLoadBanksetFile:
             },
         }
         ''')
-        bs = load_bankset_file(path)
+        result = load_bankset_file(path)
+        bs = result[0]
         bank = bs.banks["default"]
         # Should have a tuple key
         assert any(isinstance(k, tuple) for k in bank.keys())
@@ -123,7 +126,8 @@ class TestLoadBanksetFile:
         }
         ''')
         captured = []
-        bs = load_bankset_file(path)
+        result = load_bankset_file(path)
+        bs = result[0]
         bs.set_output_fn(captured.append)
         result = bs.handle(make_cc(0, value=127))
         assert result is not None
@@ -140,7 +144,8 @@ class TestLoadBanksetFile:
             },
         }
         ''')
-        bs = load_bankset_file(path)
+        result = load_bankset_file(path)
+        bs = result[0]
         assert bs.active_bank == "other"
 
     def test_timing_override(self):
@@ -153,7 +158,8 @@ class TestLoadBanksetFile:
             "banks": {"default": {}},
         }
         ''')
-        bs = load_bankset_file(path)
+        result = load_bankset_file(path)
+        bs = result[0]
         assert bs._long_press_ms         == 250
         assert bs._multi_press_window_ms == 200
         assert bs._chord_window_ms       == 50
@@ -188,6 +194,34 @@ class TestLoadBanksetFile:
             },
         }
         ''')
-        bs = load_bankset_file(path)
+        result = load_bankset_file(path)
+        bs = result[0]
         errors = bs.validate()
         assert any("missing required 'send'" in e for e in errors)
+
+    def test_list_of_banksets(self):
+        path = write_mer('''
+        [
+            {
+                "name": "global",
+                "banks": {"default": {}},
+            },
+            {
+                "name": "actition",
+                "banks": {
+                    "default": {
+                        "CC0": [{"send": "CC4", "press_only": True}],
+                    },
+                },
+            },
+        ]
+        ''')
+        result = load_bankset_file(path)
+        assert len(result) == 2
+        assert result[0].name == "global"
+        assert result[1].name == "actition"
+
+    def test_empty_list_raises(self):
+        path = write_mer('[]')
+        with pytest.raises(ValueError, match="empty list"):
+            load_bankset_file(path)

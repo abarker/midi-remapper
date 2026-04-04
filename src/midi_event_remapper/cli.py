@@ -187,8 +187,13 @@ def main():
         banksets = []
         for path in args.configs:
             try:
-                bs = load_bankset_file(path)
-                banksets.append(bs)
+                loaded = load_bankset_file(path)
+                # load_bankset_file always returns a list; extend flattens it.
+                for item in loaded:
+                    if isinstance(item, list):
+                        banksets.extend(item)  # guard against accidental nesting
+                    else:
+                        banksets.append(item)
             except (FileNotFoundError, ValueError) as e:
                 print(f"\n[cli] ERROR loading {path}:\n  {e}\n")
                 sys.exit(1)

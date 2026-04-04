@@ -93,25 +93,61 @@ def _convert_keys(bank):
     return result
 
 
+def _make_bankset(data, default_name):
+    """Construct a BankSet from a single dict, applying global defaults."""
+    data = dict(data)
+
+    if "name" not in data:
+        data["name"] = default_name
+
+    if "banks" not in data:
+        raise ValueError(
+            f"BankSet {data['name']!r} is missing required 'banks' key"
+        )
+
+    data["banks"] = {
+        bank_name: _convert_keys(bank)
+        for bank_name, bank in data["banks"].items()
+    }
+
+    return BankSet(
+        name                  = data["name"],
+        banks                 = data["banks"],
+        active_bank           = data.get("active_bank", "default"),
+        output_fn             = None,
+        debug                 = data.get("debug",
+                                         global_config.DEBUG),
+        data_offset           = data.get("data_offset",
+                                         global_config.DATA_OFFSET),
+        debounce_ms           = data.get("debounce_ms",
+                                         global_config.DEBOUNCE_MS),
+        multi_press_window_ms = data.get("multi_press_window_ms",
+                                         global_config.MULTI_PRESS_WINDOW_MS),
+        chord_window_ms       = data.get("chord_window_ms",
+                                         global_config.CHORD_WINDOW_MS),
+        long_press_ms         = data.get("long_press_ms",
+                                         global_config.LONG_PRESS_MS),
+    )
+
+
 def load_bankset_file(path):
     """
-    Load a BankSet config file and return a BankSet instance.
+    Load a BankSet config file and return a list of BankSet instances.
+
+    A file containing a single dict returns a one-element list.
+    A file containing a list of dicts returns one BankSet per dict.
 
     Parameters
     ----------
     path : str or Path
-        Path to the config file.
 
     Returns
     -------
-    BankSet
+    list[BankSet]
 
     Raises
     ------
-    ValueError
-        If the file cannot be parsed or is missing required fields.
-    FileNotFoundError
-        If the file does not exist.
+    ValueError, FileNotFoundError
     """
     path = Path(path)
     if not path.exists():
@@ -126,47 +162,18 @@ def load_bankset_file(path):
             f"  No imports, function calls, or BankSet() -- just data."
         ) from e
 
-    if not isinstance(data, dict):
+    if isinstance(data, dict):
+        return [_make_bankset(data, path.stem)]
+    elif isinstance(data, list):
+        if not data:
+            raise ValueError(f"Config file {path} contains an empty list")
+        if not all(isinstance(d, dict) for d in data):
+            raise ValueError(
+                f"Config file {path}: must contain a dict or list of dicts"
+            )
+        return [_make_bankset(d, path.stem) for d in data]
+    else:
         raise ValueError(
-            f"Config file {path} must contain a dict, got "
-            f"{type(data).__name__}"
+            f"Config file {path} must contain a dict or list of dicts, "
+            f"got {type(data).__name__}"
         )
-
-    if "name" not in data:
-        # Default name from filename stem.
-        data = dict(data)
-        data["name"] = path.stem
-
-    if "banks" not in data:
-        raise ValueError(
-            f"Config file {path} is missing required 'banks' key"
-        )
-
-    # Convert chord string keys in all banks.
-    converted_banks = {
-        bank_name: _convert_keys(bank)
-        for bank_name, bank in data["banks"].items()
-    }
-    data = dict(data)
-    data["banks"] = converted_banks
-
-    # Fill in global defaults for any omitted timing parameters.
-    kwargs = {
-        "name":                  data.get("name"),
-        "banks":                 data["banks"],
-        "active_bank":           data.get("active_bank", "default"),
-        "output_fn":             None,  # set by dispatcher
-        "debug":                 data.get("debug", global_config.DEBUG),
-        "data_offset":           data.get("data_offset",
-                                          global_config.DATA_OFFSET),
-        "debounce_ms":           data.get("debounce_ms",
-                                          global_config.DEBOUNCE_MS),
-        "multi_press_window_ms": data.get("multi_press_window_ms",
-                                          global_config.MULTI_PRESS_WINDOW_MS),
-        "chord_window_ms":       data.get("chord_window_ms",
-                                          global_config.CHORD_WINDOW_MS),
-        "long_press_ms":         data.get("long_press_ms",
-                                          global_config.LONG_PRESS_MS),
-    }
-
-    return BankSet(**kwargs)
