@@ -73,6 +73,7 @@ class BankSet:
         banks,
         active_bank           = "default",
         output_fn             = None,
+        display_fn            = None,
         debug                 = False,
         data_offset           = 1,
         debounce_ms           = 60,
@@ -85,6 +86,7 @@ class BankSet:
         self.active_bank = active_bank
 
         self._output_fn             = output_fn
+        self._display_fn            = display_fn  # called on bank switch: fn(bankset_name, bank_name)
         self._debug                 = debug
         self._data_offset           = data_offset
         self._debounce_ms           = debounce_ms
@@ -154,6 +156,11 @@ class BankSet:
                 f"{'='*50}\n"
             )
         self.active_bank = name
+        if self._display_fn is not None:
+            try:
+                self._display_fn(self.name, name)
+            except Exception:
+                pass  # never let display errors crash the MIDI handler
 
     def handle(self, event):
         """

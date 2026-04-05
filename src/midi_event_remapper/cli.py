@@ -28,6 +28,9 @@ Start with a specific bank active:
 
 Override timing constants for this session:
     midi-remapper actition.mer --long-press-ms 400 --multi-press-ms 250
+
+Show a live bank name display window during performance:
+    midi-remapper actition.mer --display
 """
 import argparse
 import sys
@@ -119,6 +122,15 @@ def build_parser():
         default = None,
         dest    = "chord_window_ms",
         help    = "Override CHORD_WINDOW_MS for this session.",
+    )
+
+    parser.add_argument(
+        "--display", "-d",
+        action  = "store_true",
+        help    = (
+            "Open a window showing the current bank name in large text. "
+            "Useful during live performance to confirm bank switches."
+        ),
     )
 
     parser.add_argument(
@@ -240,12 +252,43 @@ def main():
     # Run
     # ------------------------------------------------------------------
     from midi_event_remapper import dispatcher
+
     # Override the global BANK_SETS used by the dispatcher.
     global_config.BANK_SETS = banksets
     # Apply debug to global config too (affects dispatcher print calls).
     if args.debug is not None:
         global_config.DEBUG = args.debug
-    dispatcher.run()
+
+    # --display: start the bank name window and wire it into each BankSet.
+    display = None
+    if args.display:
+        try:
+            from midi_event_remapper.bank_display import BankDisplay
+            display = BankDisplay()
+            display.start()
+            for bs in banksets:
+                bs._display_fn = display.update
+            # Show initial state.
+            for bs in banksets:
+                if bs.active_bank != "default" or len(bs.banks) > 1:
+                    display.update(bs.name, bs.active_bank)
+                    break
+            else:
+                if banksets:
+                    display.update(banksets[0].name, banksets[0].active_bank)
+        except ImportError:
+            print(
+                "[cli] WARNING: tkinter is not available -- "
+                "--display requires tkinter (usually part of the Python "
+                "standard library; install python3-tk on Debian/Ubuntu)."
+            )
+            display = None
+
+    try:
+        dispatcher.run()
+    finally:
+        if display is not None:
+            display.stop()
 
 
 if __name__ == "__main__":
