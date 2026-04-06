@@ -52,9 +52,10 @@ class FakeTimer:
     def fire(self):
         if not self.cancelled:
             self.fn(*self.args)
+            self._fired = True
 
     def is_alive(self):
-        return not self.cancelled
+        return not self.cancelled and not getattr(self, '_fired', False)
 
     @classmethod
     def clear(cls):

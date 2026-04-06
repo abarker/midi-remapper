@@ -355,6 +355,137 @@ class TestGestureCombined:
 
 
 # ---------------------------------------------------------------------------
+# Gesture: hold-repeat
+# ---------------------------------------------------------------------------
+
+class TestGestureRepeat:
+
+    def _make(self, repeat_delay_ms=200, repeat_ms=100):
+        return make_bankset(
+            {"default": {
+                "CC0": {
+                    "repeat": [{"send": "CC10", "value": 127}],
+                },
+            }},
+            long_press_ms   = 500,
+        )
+
+    def _make_with_single(self, repeat_delay_ms=200, repeat_ms=100):
+        return make_bankset(
+            {"default": {
+                "CC0": {
+                    "single": [{"send": "CC20", "value": 127}],
+                    "repeat": [{"send": "CC10", "value": 127}],
+                    "repeat_delay_ms": repeat_delay_ms,
+                    "repeat_ms":       repeat_ms,
+                },
+            }},
+        )
+
+    def test_press_suppressed(self, fake_timer):
+        bs, out = self._make()
+        result = bs.handle(make_cc(0, value=127))
+        assert result == []
+
+    def test_first_repeat_fires_after_delay(self, fake_timer):
+        bs, out = self._make()
+        bs.handle(make_cc(0, value=127))
+        assert len(fake_timer.active()) == 1
+        fake_timer.active()[0].fire()
+        assert len(out) == 1
+        assert out[0].ctrl == 10
+
+    def test_repeat_reschedules_itself(self, fake_timer):
+        # After first repeat fires, a new timer should be scheduled.
+        bs, out = self._make()
+        bs.handle(make_cc(0, value=127))
+        first_timer = fake_timer.active()[0]
+        first_timer.fire()
+        assert len(out) == 1
+        # A new repeat timer should now be pending in the BankSet state.
+        assert "CC0" in bs._gesture_repeat_timers
+        assert not bs._gesture_repeat_timers["CC0"].cancelled
+
+    def test_second_repeat_fires(self, fake_timer):
+        bs, out = self._make()
+        bs.handle(make_cc(0, value=127))
+        fake_timer.active()[0].fire()  # first repeat
+        fake_timer.active()[0].fire()  # second repeat
+        assert len(out) == 2
+        assert all(e.ctrl == 10 for e in out)
+
+    def test_release_cancels_repeat(self, fake_timer):
+        bs, out = self._make()
+        bs.handle(make_cc(0, value=127))
+        first = fake_timer.active()[0]
+        first.fire()                        # first repeat fires
+        bs.handle(make_cc(0, value=0))      # release
+        # The rescheduled repeat timer should be cancelled.
+        assert "CC0" not in bs._gesture_repeat_timers
+        assert len(out) == 1  # only the one repeat that already fired
+
+    def test_quick_release_before_first_repeat_fires_single(self, fake_timer):
+        # Release before any repeat fires -- treated as quick tap.
+        bs, out = self._make_with_single(repeat_delay_ms=500)
+        bs.handle(make_cc(0, value=127))
+        result = bs.handle(make_cc(0, value=0))   # quick release
+        # 'single' fires via return value.
+        assert result is not None
+        assert len(result) == 1
+        assert result[0].ctrl == 20
+
+    def test_release_after_repeat_fires_nothing(self, fake_timer):
+        # Hold long enough for repeat to fire, then release -- no extra output.
+        bs, out = self._make_with_single()
+        bs.handle(make_cc(0, value=127))
+        fake_timer.active()[0].fire()      # repeat fires
+        result = bs.handle(make_cc(0, value=0))
+        # Repeat already fired, so release is silent.
+        assert result == []
+        assert len(out) == 1  # only the repeat event
+
+    def test_repeat_delay_ms_per_key_override(self, fake_timer):
+        bs, out = make_bankset({"default": {
+            "CC0": {
+                "repeat":           [{"send": "CC10", "value": 127}],
+                "repeat_delay_ms":  50,
+                "repeat_ms":        25,
+            },
+        }})
+        bs.handle(make_cc(0, value=127))
+        assert len(fake_timer.active()) == 1
+        fake_timer.active()[0].fire()
+        assert out[0].ctrl == 10
+
+    def test_repeat_with_double(self, fake_timer):
+        # Double tap should still work alongside repeat.
+        bs, out = make_bankset({"default": {
+            "CC0": {
+                "single": [{"send": "CC10", "value": 127}],
+                "double": [{"send": "CC11", "value": 127}],
+                "repeat": [{"send": "CC12", "value": 127}],
+                "repeat_delay_ms": 300,
+            },
+        }})
+        # First press + quick release (no repeat fires) -> single pending
+        bs.handle(make_cc(0, value=127))
+        bs.handle(make_cc(0, value=0))
+        assert bs._gesture_counts.get("CC0") == 1
+
+        # Second press + quick release -> count = 2
+        bs.handle(make_cc(0, value=127))
+        bs.handle(make_cc(0, value=0))
+        assert bs._gesture_counts.get("CC0") == 2
+
+        # Multipress window expires -> double fires
+        multi_timer = bs._gesture_timers.get("CC0")
+        assert multi_timer is not None
+        multi_timer.fire()
+        assert len(out) == 1
+        assert out[0].ctrl == 11
+
+
+# ---------------------------------------------------------------------------
 # Trigger value
 # ---------------------------------------------------------------------------
 

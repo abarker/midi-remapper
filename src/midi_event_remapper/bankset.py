@@ -63,9 +63,10 @@ class BankSet:
     """
 
     # Config dict keys that are metadata, not action labels.
-    _META_KEYS    = frozenset({"long_ms", "trigger_value", "debounce_ms"})
+    _META_KEYS    = frozenset({"long_ms", "trigger_value", "debounce_ms",
+                               "repeat_delay_ms", "repeat_ms"})
     # Valid action labels for gesture entries.
-    _GESTURE_KEYS = frozenset({"single", "double", "triple", "long"})
+    _GESTURE_KEYS = frozenset({"single", "double", "triple", "long", "repeat"})
 
     def __init__(
         self,
@@ -93,6 +94,8 @@ class BankSet:
         self._multi_press_window_ms = multi_press_window_ms
         self._chord_window_ms       = chord_window_ms
         self._long_press_ms         = long_press_ms
+        self._repeat_delay_ms       = 500   # default: ms before first repeat
+        self._repeat_ms             = 100   # default: ms between repeats
 
         # Toggle state. Persists across bank switches intentionally.
         self._toggle_states = {}   # key -> bool (False=a, True=b)
@@ -103,8 +106,10 @@ class BankSet:
         self._gesture_press_time = {}  # key -> float (time of most recent press)
         self._gesture_timers     = {}  # key -> Timer (multipress window timer)
         self._gesture_events     = {}  # key -> event (most recent press event)
-        self._gesture_long_timers = {} # key -> Timer (long-press threshold timer)
-        self._gesture_long_fired  = set()  # keys where long already fired via timer
+        self._gesture_long_timers   = {} # key -> Timer (long-press threshold timer)
+        self._gesture_long_fired    = set()  # keys where long already fired via timer
+        self._gesture_repeat_timers = {} # key -> Timer (current pending repeat timer)
+        self._gesture_repeat_fired  = set()  # keys where repeat has fired at least once
 
         # Chord state
         # frozenset -> {"arrived": set, "timer": Timer,
@@ -383,16 +388,25 @@ class BankSet:
                     else:
                         check_sequence(value[state], f"{ctx}[{state!r}]")
             elif etype == "gesture":
-                # 'long' requires a release signal: CC or NOTE only, not PC
-                if "long" in value and isinstance(key, str) and \
-                   key.startswith("PC"):
+                # 'long' and 'repeat' both require a momentary input
+                for hold_label in ("long", "repeat"):
+                    if hold_label in value and isinstance(key, str) and \
+                       key.startswith("PC"):
+                        errors.append(
+                            f"{ctx}: {hold_label!r} requires a momentary "
+                            f"input (CC or NOTE); PC events have no release "
+                            f"signal"
+                        )
+                # 'long' and 'repeat' are mutually exclusive
+                if "long" in value and "repeat" in value:
                     errors.append(
-                        f"{ctx}: 'long' requires a momentary input "
-                        f"(CC or NOTE); PC events have no release signal"
+                        f"{ctx}: 'long' and 'repeat' cannot both be defined "
+                        f"in the same entry -- 'long' fires once at threshold, "
+                        f"'repeat' fires repeatedly; choose one"
                     )
                 if "trigger_value" in value:
                     check_trigger_value(value["trigger_value"], ctx)
-                for label in ("single", "double", "triple", "long"):
+                for label in ("single", "double", "triple", "long", "repeat"):
                     if label in value:
                         check_sequence(value[label], f"{ctx}[{label!r}]")
             elif etype == "chord":
@@ -563,7 +577,8 @@ class BankSet:
         if not self._matches_trigger_value(entry, event):
             return None   # trigger_value filter failed: pass through
 
-        has_long   = "long" in entry
+        has_long   = "long"   in entry
+        has_repeat = "repeat" in entry
         has_multi  = "double" in entry or "triple" in entry
         has_single = "single" in entry
 
@@ -572,7 +587,7 @@ class BankSet:
         self._gesture_press_time[key] = time.time()
         self._gesture_events[key]     = event
 
-        if not has_long and not has_multi:
+        if not has_long and not has_repeat and not has_multi:
             # Only 'single' defined: fire immediately, no timing needed.
             self._gesture_counts.pop(key, None)
             self._gesture_press_time.pop(key, None)
@@ -581,15 +596,17 @@ class BankSet:
                 return self._execute_sequence(entry["single"], event)
             return []
 
-        if has_multi and not has_long:
-            # Multi-press only (no long): start the window timer on press.
-            # Each new press resets the timer.
+        if has_multi and not has_long and not has_repeat:
+            # Multi-press only: start the window timer on press.
             self._reset_gesture_timer(key, entry, event)
 
         if has_long:
-            # Start a long-press timer that fires immediately when the
-            # threshold is exceeded, without waiting for release.
+            # Start a long-press timer that fires at threshold.
             self._start_long_timer(key, entry, event)
+
+        if has_repeat:
+            # Start the initial repeat delay timer.
+            self._start_repeat_timer(key, entry, event, initial=True)
 
         # Suppress the press; dispatch happens on release or timer.
         return []
@@ -627,24 +644,75 @@ class BankSet:
         self._gesture_long_timers[key] = t
         self._timer_list.append(t)
 
+    def _start_repeat_timer(self, key, entry, event, initial=False):
+        """
+        Schedule the next repeat fire for key.
+
+        On the initial call (initial=True) the delay is repeat_delay_ms
+        (hold time before first repeat fires).  On subsequent calls the
+        delay is repeat_ms (interval between repeats).
+
+        Each firing reschedules itself, so repeating continues until
+        _cancel_repeat() is called on release.
+        """
+        existing = self._gesture_repeat_timers.pop(key, None)
+        if existing:
+            existing.cancel()
+
+        delay_ms = (
+            entry.get("repeat_delay_ms", self._repeat_delay_ms) if initial
+            else entry.get("repeat_ms",  self._repeat_ms)
+        )
+
+        def fire_repeat(key_=key, entry_=entry, ev_=event):
+            self._gesture_repeat_timers.pop(key_, None)
+            # If the key was already released, do nothing.
+            if key_ not in self._gesture_press_time:
+                return
+            self._gesture_repeat_fired.add(key_)
+            if self._debug:
+                print(f"[gesture:{self.name}] key={key_} -> repeat")
+            self._fire_sequence(entry_["repeat"], ev_)
+            # Reschedule for the next repeat interval.
+            self._start_repeat_timer(key_, entry_, ev_, initial=False)
+
+        t = threading.Timer(delay_ms / 1000.0, fire_repeat)
+        t.daemon = True
+        t.start()
+        self._gesture_repeat_timers[key] = t
+        self._timer_list.append(t)
+
+    def _cancel_repeat(self, key):
+        """Cancel any pending repeat timer for key and clear fired state."""
+        t = self._gesture_repeat_timers.pop(key, None)
+        if t:
+            t.cancel()
+        self._gesture_repeat_fired.discard(key)
+
     def _handle_gesture_release(self, key, entry, event):
         """
         Handle a release event for a gesture entry.
 
-        If the long timer already fired, suppress the release.
-        Otherwise cancel the long timer and dispatch based on elapsed time:
-        if hold exceeded long_ms fire 'long'; if short press fire 'single'
-        or start the multipress accumulation timer.
+        Cancels any pending long or repeat timers.  Dispatches:
+          - 'long' if hold exceeded long_ms (edge case: timer and release race)
+          - 'single' on quick release if defined (and no multi pending)
+          - starts multipress timer if double/triple defined
+          - nothing if 'repeat' fired at least once (release just stops it)
         """
+        # Cancel any running repeat timer -- key released.
+        # Save the fired flag first since _cancel_repeat clears it.
+        repeat_already_fired = key in self._gesture_repeat_fired
+        self._cancel_repeat(key)
+
         press_time = self._gesture_press_time.pop(key, None)
         if press_time is None:
             return None
 
-        has_long  = "long" in entry
-        has_multi = "double" in entry or "triple" in entry
+        has_long   = "long"   in entry
+        has_repeat = "repeat" in entry
+        has_multi  = "double" in entry or "triple" in entry
 
         if has_long:
-            # Cancel the long timer -- release arrived before it fired.
             lt = self._gesture_long_timers.pop(key, None)
             if lt:
                 lt.cancel()
@@ -653,7 +721,6 @@ class BankSet:
             threshold  = entry.get("long_ms", self._long_press_ms)
 
             if elapsed_ms >= threshold:
-                # Release arrived at the same time as threshold -- fire long.
                 mt = self._gesture_timers.pop(key, None)
                 if mt:
                     mt.cancel()
@@ -666,24 +733,45 @@ class BankSet:
                     )
                 return self._execute_sequence(entry["long"], event)
 
-            # Short press (tap/single).
+            # Short press.
             if self._debug:
                 print(
                     f"[gesture:{self.name}] key={key} "
                     f"elapsed={elapsed_ms:.0f}ms -> single/tap"
                 )
             if not has_multi:
-                # No multipress: fire 'single' now.
                 self._gesture_counts.pop(key, None)
                 self._gesture_events.pop(key, None)
                 if "single" in entry:
                     return self._execute_sequence(entry["single"], event)
                 return []
-            # Has both long and multi: tap confirmed, start multipress timer.
             self._reset_gesture_timer(key, entry, event)
             return []
 
-        # No 'long': release carries no action (timer handles everything).
+        if has_repeat:
+            repeat_fired = repeat_already_fired
+
+            if not repeat_fired:
+                # Quick tap before first repeat -- treat as single.
+                if self._debug:
+                    print(
+                        f"[gesture:{self.name}] key={key} "
+                        f"-> single (released before first repeat)"
+                    )
+                if not has_multi:
+                    self._gesture_counts.pop(key, None)
+                    self._gesture_events.pop(key, None)
+                    if "single" in entry:
+                        return self._execute_sequence(entry["single"], event)
+                    return []
+                self._reset_gesture_timer(key, entry, event)
+            else:
+                # At least one repeat fired; release silently stops it.
+                self._gesture_counts.pop(key, None)
+                self._gesture_events.pop(key, None)
+            return []
+
+        # No 'long' or 'repeat': release carries no action (timer handles it).
         return []
 
     def _reset_gesture_timer(self, key, entry, event):

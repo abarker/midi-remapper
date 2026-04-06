@@ -275,6 +275,21 @@ class TestStructuralErrors:
             },
         }}, "no individual release signal")
 
+    def test_repeat_on_pc_key_caught(self):
+        assert_error({"default": {
+            "PC4": {
+                "repeat": [{"send": "CC10", "value": 1}],
+            },
+        }}, "momentary")
+
+    def test_repeat_and_long_together_caught(self):
+        assert_error({"default": {
+            "CC0": {
+                "long":   [{"send": "CC10", "value": 1}],
+                "repeat": [{"send": "CC11", "value": 1}],
+            },
+        }}, "cannot both be defined")
+
     def test_trigger_value_invalid_syntax(self):
         assert_error({"default": {
             "CC0": {
