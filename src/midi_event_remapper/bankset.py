@@ -289,6 +289,17 @@ class BankSet:
                             f"bank {item['bank']!r}"
                         )
                     continue
+                if send == "CMD":
+                    if "cmd" not in item:
+                        errors.append(
+                            f"{ctx}[{i}]: CMD send missing required 'cmd' key"
+                        )
+                    elif not isinstance(item["cmd"], str) or \
+                         not item["cmd"].strip():
+                        errors.append(
+                            f"{ctx}[{i}]: CMD 'cmd' must be a non-empty string"
+                        )
+                    continue
                 # Wrong keyword checks
                 if send.startswith("CC") and "velocity" in item:
                     errors.append(
@@ -332,7 +343,7 @@ class BankSet:
                             )
                     except ValueError:
                         errors.append(f"{ctx}[{i}]: malformed send {send!r}")
-                elif send != "SYSEX":
+                elif send not in ("SYSEX", "CMD"):
                     errors.append(
                         f"{ctx}[{i}]: unrecognised send {send!r}"
                     )
@@ -500,6 +511,18 @@ class BankSet:
                 self.switch_bank(item["bank"])
                 continue
 
+            if send == "CMD":
+                cmd = item.get("cmd", "")
+                if cmd:
+                    if delay <= 0:
+                        self._run_cmd(cmd)
+                    else:
+                        t = threading.Timer(delay, self._run_cmd, args=(cmd,))
+                        t.daemon = True
+                        t.start()
+                        self._timer_list.append(t)
+                continue
+
             if item.get("press_only") and is_release(event):
                 continue
 
@@ -521,6 +544,41 @@ class BankSet:
                 self._timer_list.append(t)
 
         return immediate
+
+    def _run_cmd(self, cmd):
+        """
+        Run a shell command in a subprocess, non-blocking.
+
+        The command is run via the shell so pipes, redirects, and shell
+        builtins all work.  stdout and stderr are captured; in debug mode
+        any output is printed after the process completes.
+
+        Safe to call from both the mididings callback and timer threads.
+        """
+        import subprocess
+
+        def run():
+            try:
+                result = subprocess.run(
+                    cmd,
+                    shell   = True,
+                    capture_output = True,
+                    text    = True,
+                )
+                if self._debug:
+                    print(f"  [cmd] $ {cmd}")
+                    if result.stdout.strip():
+                        print(f"  [cmd] stdout: {result.stdout.strip()}")
+                    if result.stderr.strip():
+                        print(f"  [cmd] stderr: {result.stderr.strip()}")
+                    if result.returncode != 0:
+                        print(f"  [cmd] exit code: {result.returncode}")
+            except Exception as e:
+                if self._debug:
+                    print(f"  [cmd] ERROR running {cmd!r}: {e}")
+
+        t = threading.Thread(target=run, daemon=True)
+        t.start()
 
     def _fire_sequence(self, seq, event):
         """

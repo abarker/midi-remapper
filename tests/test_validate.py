@@ -297,3 +297,33 @@ class TestStructuralErrors:
                 "single": [{"send": "CC10", "value": 1}],
             },
         }}, "invalid trigger_value")
+
+class TestCmdValidation:
+
+    def test_cmd_valid(self):
+        assert_clean({"default": {
+            "PC5": [{"send": "CMD", "cmd": "echo hello"}],
+        }})
+
+    def test_cmd_missing_cmd_key(self):
+        assert_error({"default": {
+            "PC5": [{"send": "CMD"}],
+        }}, "missing required 'cmd' key")
+
+    def test_cmd_empty_string(self):
+        assert_error({"default": {
+            "PC5": [{"send": "CMD", "cmd": ""}],
+        }}, "non-empty string")
+
+    def test_cmd_whitespace_only(self):
+        assert_error({"default": {
+            "PC5": [{"send": "CMD", "cmd": "   "}],
+        }}, "non-empty string")
+
+    def test_cmd_combined_with_midi(self):
+        assert_clean({"default": {
+            "PC5": [
+                {"send": "CC10", "value": 127},
+                {"send": "CMD",  "cmd": "jack_transport start"},
+            ],
+        }})

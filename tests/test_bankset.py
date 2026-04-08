@@ -853,6 +853,89 @@ class TestChordMultiPress:
 
 
 # ---------------------------------------------------------------------------
+# CMD send
+# ---------------------------------------------------------------------------
+
+class TestCmdSend:
+    """Tests for the CMD send type (shell command execution)."""
+
+    def test_cmd_runs_on_direct_mapping(self, fake_timer):
+        # CMD fires a subprocess thread; we can verify it doesn't raise
+        # and that the MIDI callback returns normally.
+        bs, out = make_bankset({"default": {
+            "PC5": [{"send": "CMD", "cmd": "true"}],
+        }})
+        result = bs.handle(make_pc(5))
+        # CMD items don't produce MIDI output -- result should be []
+        assert result == []
+
+    def test_cmd_runs_non_blocking(self, fake_timer):
+        # A slow command should not block; the handler returns immediately.
+        import time
+        bs, out = make_bankset({"default": {
+            "PC5": [{"send": "CMD", "cmd": "sleep 10"}],
+        }})
+        t0 = time.time()
+        bs.handle(make_pc(5))
+        elapsed = time.time() - t0
+        assert elapsed < 0.5   # must return well before sleep finishes
+
+    def test_cmd_combined_with_midi_send(self, fake_timer):
+        # CMD and a MIDI send in the same sequence -- MIDI returns immediately,
+        # CMD runs in background.
+        bs, out = make_bankset({"default": {
+            "PC5": [
+                {"send": "CC10", "value": 127},
+                {"send": "CMD",  "cmd": "true"},
+            ],
+        }})
+        result = bs.handle(make_pc(5))
+        assert len(result) == 1
+        assert result[0].ctrl == 10
+
+    def test_cmd_with_delay(self, fake_timer):
+        bs, out = make_bankset({"default": {
+            "PC5": [{"send": "CMD", "cmd": "true", "delay": 0.1}],
+        }})
+        result = bs.handle(make_pc(5))
+        assert result == []
+        # A timer should have been scheduled for the delayed CMD.
+        assert len(fake_timer.active()) == 1
+
+    def test_cmd_in_gesture(self, fake_timer):
+        bs, out = make_bankset({"default": {
+            "CC0": {
+                "single": [
+                    {"send": "CC10", "value": 127},
+                    {"send": "CMD",  "cmd": "true"},
+                ],
+                "long": [{"send": "CMD", "cmd": "echo long"}],
+            },
+        }})
+        # long fires via timer
+        bs.handle(make_cc(0, value=127))
+        fake_timer.active()[0].fire()
+        # CMD runs but produces no MIDI output
+        assert out == []
+
+    def test_cmd_in_chord(self, fake_timer):
+        bs, out = make_bankset({
+            "default": {
+                ("CC1", "CC2"): {
+                    "single": [
+                        {"send": "BANK", "bank": "drums"},
+                        {"send": "CMD",  "cmd": "echo switched"},
+                    ],
+                },
+            },
+            "drums": {},
+        })
+        bs.handle(make_cc(1))
+        bs.handle(make_cc(2))
+        assert bs.active_bank == "drums"
+
+
+# ---------------------------------------------------------------------------
 # Bank switching
 # ---------------------------------------------------------------------------
 
