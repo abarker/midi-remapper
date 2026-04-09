@@ -117,6 +117,8 @@ A gesture entry is a dict containing any subset of:
                  Requires a momentary input (CC or NOTE); NOT valid for
                  PC keys.  Mutually exclusive with 'long'.
     "long_ms"         -- hold threshold in ms (default: LONG_PRESS_MS)
+    "multi_ms"        -- per-key multi-press window in ms, overrides
+                         MULTI_PRESS_WINDOW_MS for this key only
     "repeat_delay_ms" -- hold time before first repeat fires (default: 500ms)
     "repeat_ms"       -- interval between subsequent repeats (default: 100ms)
     "trigger_value"   -- only dispatch when incoming event value matches
@@ -242,9 +244,28 @@ Each sequence is a list of dicts.  Required key: "send".
                         Not needed in gesture/toggle sequences (releases
                         are automatically suppressed for those types).
 
-    Special send:
+    Special sends:
         "BANK"       -- switch this BankSet to another bank;
                         also requires "bank": "<bank_name>"
+        "CMD"        -- run a shell command in a background thread.
+                        Also requires "cmd": "<shell command string>".
+                        Non-blocking: the MIDI handler returns immediately.
+                        stdout/stderr are printed in debug mode.
+                        The command is run via the shell, so pipes,
+                        redirects, and environment variables all work.
+
+                        Examples:
+                            {"send": "CMD", "cmd": "jack_transport start"}
+                            {"send": "CMD", "cmd": "jack_transport locate 0"}
+                            {"send": "CMD", "cmd": "aconnect 14:0 128:0"}
+                            {"send": "CMD", "cmd": "echo 120 > /tmp/bpm.txt"}
+
+                        CMD items can be combined with MIDI sends in the
+                        same sequence:
+                            [
+                                {"send": "CC10", "value": 127},
+                                {"send": "CMD",  "cmd": "jack_transport start"},
+                            ]
 
     Note: using "velocity" on a CC send or "value" on a NOTE send is a
     config error and will be caught by validate() at startup.

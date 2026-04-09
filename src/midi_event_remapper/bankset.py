@@ -64,7 +64,7 @@ class BankSet:
 
     # Config dict keys that are metadata, not action labels.
     _META_KEYS    = frozenset({"long_ms", "trigger_value", "debounce_ms",
-                               "repeat_delay_ms", "repeat_ms"})
+                               "repeat_delay_ms", "repeat_ms", "multi_ms"})
     # Valid action labels for gesture entries.
     _GESTURE_KEYS = frozenset({"single", "double", "triple", "long", "repeat"})
 
@@ -856,7 +856,8 @@ class BankSet:
             if label and label in entry_:
                 self._fire_sequence(entry_[label], ev)
 
-        t = threading.Timer(self._multi_press_window_ms / 1000.0, fire)
+        window_ms = entry.get("multi_ms", self._multi_press_window_ms)
+        t = threading.Timer(window_ms / 1000.0, fire)
         t.daemon = True
         t.start()
         self._gesture_timers[key] = t
@@ -1183,7 +1184,8 @@ class BankSet:
             if label and label in entry_:
                 self._fire_sequence(entry_[label], ev_)
 
-        t = threading.Timer(self._multi_press_window_ms / 1000.0, fire)
+        window_ms = entry.get("multi_ms", self._multi_press_window_ms)
+        t = threading.Timer(window_ms / 1000.0, fire)
         t.daemon = True
         t.start()
         self._chord_counts[fk] = {"count": count, "timer": t}

@@ -314,6 +314,22 @@ class TestGestureMulti:
         fake_timer.active()[0].fire()
         assert out == []
 
+    def test_multi_ms_per_key_override(self, fake_timer):
+        # multi_ms overrides the global MULTI_PRESS_WINDOW_MS for this key.
+        bs, out = make_bankset({"default": {
+            "PC4": {
+                "single": [{"send": "CC10", "value": 1}],
+                "double": [{"send": "CC11", "value": 2}],
+                "multi_ms": 150,
+            },
+        }}, multi_press_window_ms=300)
+        bs.handle(make_pc(4))
+        # The timer delay should use 150ms not 300ms.
+        assert len(fake_timer.active()) == 1
+        assert fake_timer.active()[0].delay == 0.15
+        fake_timer.active()[0].fire()
+        assert out[0].ctrl == 10
+
 
 # ---------------------------------------------------------------------------
 # Gesture: combined long + multi
