@@ -1,5 +1,4 @@
-"""
-loader.py
+"""loader.py
 
 Loads external BankSet config files using ast.literal_eval.
 
@@ -8,13 +7,13 @@ execution.  They are safe to load from untrusted sources.
 
 USAGE
 -----
-Each .mer file defines one BankSet.  Pass one or more files to
+Each .py config file defines one BankSet.  Pass one or more files to
 midi-remapper and they replace the built-in config.py BankSets:
 
-    midi-remapper actition.mer
-    midi-remapper global.mer actition.mer
+    midi-remapper actition.py
+    midi-remapper global.py actition.py
 
-Files are processed in order, so global.mer would be checked first
+Files are processed in order, so global.py would be checked first
 (matching the behaviour of the built-in global_banks + actition_banks).
 
 FILE FORMAT
@@ -47,7 +46,7 @@ BankSet.  The dict may include any BankSet constructor parameters:
 
 CHORD KEYS
 ----------
-Chord keys (tuples in config.py) are written as "CC1+CC2" in .mer files
+Chord keys (tuples in config.py) are written as "CC1+CC2" in .py files
 -- keys joined by "+".  Key order does not matter: "CC1+CC2" and
 "CC2+CC1" are equivalent.  The loader converts them to tuples.
 

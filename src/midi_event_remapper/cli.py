@@ -1,5 +1,4 @@
-"""
-cli.py
+"""cli.py
 
 Command-line interface for midi_event_remapper.
 
@@ -11,26 +10,29 @@ Run with built-in config.py settings:
     midi-remapper
 
 Run with one or more external config files (replaces built-in BankSets):
-    midi-remapper actition.mer drums.mer
+    midi-remapper actition.py drums.py
 
 Run with external files plus debug override:
-    midi-remapper actition.mer --debug
+    midi-remapper actition.py --debug
 
 Validate config files without connecting to JACK:
-    midi-remapper --validate actition.mer
-    midi-remapper actition.mer --validate
+    midi-remapper --validate actition.py
+    midi-remapper actition.py --validate
 
 List banks defined in a config file:
-    midi-remapper --list-banks actition.mer
+    midi-remapper --list-banks actition.py
 
 Start with a specific bank active:
-    midi-remapper actition.mer --bank actition:drums
+    midi-remapper actition.py --bank actition:drums
 
 Override timing constants for this session:
-    midi-remapper actition.mer --long-press-ms 400 --multi-press-ms 250
+    midi-remapper actition.py --long-press-ms 400 --multi-press-ms 250
 
 Show a live bank name display window during performance:
-    midi-remapper actition.mer --display
+    midi-remapper actition.py --display
+
+Show the display window without an OS title bar:
+    midi-remapper actition.py --no-titlebar
 """
 import argparse
 import sys
@@ -54,7 +56,7 @@ def build_parser():
         metavar = "FILE",
         nargs   = "*",
         help    = (
-            "One or more .mer (or .py) config files, each describing one "
+            "One or more .py config files, each describing one "
             "BankSet.  If none are given, the built-in config.py is used."
         ),
     )
@@ -130,6 +132,16 @@ def build_parser():
         help    = (
             "Open a window showing the current bank name in large text. "
             "Useful during live performance to confirm bank switches."
+        ),
+    )
+
+    parser.add_argument(
+        "--no-titlebar",
+        action  = "store_true",
+        dest    = "no_titlebar",
+        help    = (
+            "Remove the OS title bar from the bank display window "
+            "(implies --display).  Right-click the window for Exit / Cancel."
         ),
     )
 
@@ -260,11 +272,12 @@ def main():
         global_config.DEBUG = args.debug
 
     # --display: start the bank name window and wire it into each BankSet.
+    # --no-titlebar implies --display.
     display = None
-    if args.display:
+    if args.display or args.no_titlebar:
         try:
             from midi_event_remapper.bank_display import BankDisplay
-            display = BankDisplay()
+            display = BankDisplay(no_titlebar=args.no_titlebar)
             display.start()
             for bs in banksets:
                 bs._display_fn = display.update

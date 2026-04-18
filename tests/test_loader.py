@@ -1,7 +1,7 @@
 """
 test_loader.py
 
-Tests for the .mer config file loader.
+Tests for the .py config file loader.
 """
 import pytest
 import tempfile
@@ -58,10 +58,10 @@ class TestConvertKeys:
 # File loading
 # ---------------------------------------------------------------------------
 
-def write_mer(content):
-    """Write content to a temp .mer file and return its path."""
+def write_config(content):
+    """Write content to a temp .py config file and return its path."""
     f = tempfile.NamedTemporaryFile(
-        suffix=".mer", mode="w", delete=False
+        suffix=".py", mode="w", delete=False
     )
     f.write(content)
     f.close()
@@ -71,7 +71,7 @@ def write_mer(content):
 class TestLoadBanksetFile:
 
     def test_minimal_valid_file(self):
-        path = write_mer('''
+        path = write_config('''
         {
             "name": "test",
             "banks": {
@@ -85,20 +85,20 @@ class TestLoadBanksetFile:
         assert bs.active_bank == "default"
 
     def test_name_defaults_to_stem(self):
-        path = write_mer('''
+        path = write_config('''
         {
             "banks": {"default": {}},
         }
         ''')
         # Rename to a known stem
-        named = path.parent / "mycontroller.mer"
+        named = path.parent / "mycontroller.py"
         path.rename(named)
         result = load_bankset_file(named)
         bs = result[0]
         assert bs.name == "mycontroller"
 
     def test_chord_keys_converted(self):
-        path = write_mer('''
+        path = write_config('''
         {
             "name": "test",
             "banks": {
@@ -115,7 +115,7 @@ class TestLoadBanksetFile:
         assert any(isinstance(k, tuple) for k in bank.keys())
 
     def test_direct_mapping_works(self, fake_timer):
-        path = write_mer('''
+        path = write_config('''
         {
             "name": "test",
             "banks": {
@@ -134,7 +134,7 @@ class TestLoadBanksetFile:
         assert result[0].ctrl == 4
 
     def test_active_bank_respected(self):
-        path = write_mer('''
+        path = write_config('''
         {
             "name": "test",
             "active_bank": "other",
@@ -149,7 +149,7 @@ class TestLoadBanksetFile:
         assert bs.active_bank == "other"
 
     def test_timing_override(self):
-        path = write_mer('''
+        path = write_config('''
         {
             "name": "test",
             "long_press_ms": 250,
@@ -166,25 +166,25 @@ class TestLoadBanksetFile:
 
     def test_file_not_found(self):
         with pytest.raises(FileNotFoundError):
-            load_bankset_file("/nonexistent/path/file.mer")
+            load_bankset_file("/nonexistent/path/file.py")
 
     def test_invalid_syntax_raises_valueerror(self):
-        path = write_mer("this is not valid python {{{")
+        path = write_config("this is not valid python {{{")
         with pytest.raises(ValueError, match="Failed to parse"):
             load_bankset_file(path)
 
     def test_non_dict_content_raises_valueerror(self):
-        path = write_mer("[1, 2, 3]")
+        path = write_config("[1, 2, 3]")
         with pytest.raises(ValueError, match="must contain a dict"):
             load_bankset_file(path)
 
     def test_missing_banks_key_raises_valueerror(self):
-        path = write_mer('{"name": "test"}')
+        path = write_config('{"name": "test"}')
         with pytest.raises(ValueError, match="missing required 'banks' key"):
             load_bankset_file(path)
 
     def test_validate_catches_errors_in_loaded_file(self):
-        path = write_mer('''
+        path = write_config('''
         {
             "name": "test",
             "banks": {
@@ -200,7 +200,7 @@ class TestLoadBanksetFile:
         assert any("missing required 'send'" in e for e in errors)
 
     def test_list_of_banksets(self):
-        path = write_mer('''
+        path = write_config('''
         [
             {
                 "name": "global",
@@ -222,6 +222,6 @@ class TestLoadBanksetFile:
         assert result[1].name == "actition"
 
     def test_empty_list_raises(self):
-        path = write_mer('[]')
+        path = write_config('[]')
         with pytest.raises(ValueError, match="empty list"):
             load_bankset_file(path)

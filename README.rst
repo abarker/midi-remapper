@@ -31,10 +31,10 @@ Quick start
 -----------
 
 1. Start JACK (e.g. open QjackCtl and press Start).
-2. Create a config file ``mycontroller.mer`` (see `Config files`_ below).
+2. Create a config file ``mycontroller.py`` (see `Config files`_ below).
 3. Run::
 
-    midi-remapper mycontroller.mer
+    midi-remapper mycontroller.py
 
 4. Connect your controller's JACK MIDI output to
    ``midi_event_remapper:in_0`` and ``midi_event_remapper:out_0`` to
@@ -50,7 +50,7 @@ Command-line reference
 **Positional arguments**
 
 ``FILE``
-    One or more ``.mer`` config files (see below).  Each file defines one
+    One or more ``.py`` config files (see below).  Each file defines one
     or more BankSets.  Files are checked in order -- the first BankSet
     that matches an incoming event handles it.  If no files are given,
     the built-in ``config.py`` settings are used.
@@ -64,6 +64,11 @@ Command-line reference
     double-press registered.  Requires ``tkinter`` (standard library on most
     systems; install ``python3-tk`` on Debian/Ubuntu if missing).
 
+``--no-titlebar``
+    Same as ``--display``, but removes the OS title bar so the window takes
+    up less screen space.  Right-click anywhere on the window to show a menu
+    with **Exit** (quit the program) and **Cancel** (dismiss the menu).
+
 ``--validate``, ``-V``
     Validate config files and exit without connecting to JACK.  Use this
     to check a new config before a live session.
@@ -74,7 +79,7 @@ Command-line reference
 ``--bank BANKSET:BANK``, ``-b BANKSET:BANK``
     Override the starting bank for a named BankSet.  May be repeated::
 
-        midi-remapper mycontroller.mer --bank actition:drums
+        midi-remapper mycontroller.py --bank actition:drums
 
 ``--debug`` / ``--no-debug``
     Enable or disable debug output (overrides the file setting).
@@ -93,11 +98,11 @@ Command-line reference
 Config files
 ------------
 
-A ``.mer`` file is a plain Python data literal -- no imports, no function
+A ``.py`` file is a plain Python data literal -- no imports, no function
 calls, just a dict (single BankSet) or list of dicts (multiple BankSets).
 Comments use ``#``.  Chord keys use ``+`` notation::
 
-    # mycontroller.mer
+    # mycontroller.py
     {
         "name": "mycontroller",
         "active_bank": "default",
@@ -151,11 +156,11 @@ A single file can hold multiple BankSets as a list::
 
 Validate before running::
 
-    midi-remapper --validate mycontroller.mer
+    midi-remapper --validate mycontroller.py
 
 List available banks::
 
-    midi-remapper --list-banks mycontroller.mer
+    midi-remapper --list-banks mycontroller.py
 
 Mapping types
 -------------
@@ -449,7 +454,14 @@ Bank display window
 Run with ``--display`` to open a floating window showing the current bank
 name in a large, easy-to-read font::
 
-    midi-remapper mycontroller.mer --display
+    midi-remapper mycontroller.py --display
+
+Add ``--no-titlebar`` to remove the OS title bar for a more compact display::
+
+    midi-remapper mycontroller.py --no-titlebar
+
+In titlebar-less mode, right-click anywhere on the window for a menu with
+**Exit** (quit the program) and **Cancel** (dismiss the menu).
 
 The window stays on top of other windows and updates immediately on every
 bank switch, so you can glance at it during a performance to confirm that
