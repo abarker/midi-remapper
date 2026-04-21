@@ -143,6 +143,26 @@ class BankSet:
         """Set the function used to emit events from timer callbacks."""
         self._output_fn = fn
 
+    def cancel_timers(self):
+        """Cancel all pending timers.  Called before discarding a BankSet on reload.
+
+        Covers gesture (multipress window, long-press, repeat), chord window,
+        chord multipress, and any delayed-send timers in _timer_list.
+        """
+        for t in self._gesture_timers.values():
+            t.cancel()
+        for t in self._gesture_long_timers.values():
+            t.cancel()
+        for t in self._gesture_repeat_timers.values():
+            t.cancel()
+        for pending in self._chord_pending.values():
+            pending["timer"].cancel()
+        for state in self._chord_counts.values():
+            state["timer"].cancel()
+        for t in self._timer_list:
+            t.cancel()
+        self._timer_list.clear()
+
     @property
     def current_bank(self):
         return self.banks[self.active_bank]

@@ -33,6 +33,9 @@ Show a live bank name display window during performance:
 
 Show the display window without an OS title bar:
     midi-remapper actition.py --no-titlebar
+
+Disable live config reloading:
+    midi-remapper actition.py --no-reload
 """
 import argparse
 import sys
@@ -142,6 +145,16 @@ def build_parser():
         help    = (
             "Remove the OS title bar from the bank display window "
             "(implies --display).  Right-click the window for Exit / Cancel."
+        ),
+    )
+
+    parser.add_argument(
+        "--no-reload",
+        action  = "store_true",
+        dest    = "no_reload",
+        help    = (
+            "Disable live config file reloading.  By default, config files "
+            "are watched for changes and reloaded automatically."
         ),
     )
 
@@ -297,9 +310,23 @@ def main():
             )
             display = None
 
+    # Start the live reloader when external config files are in use.
+    reloader = None
+    if args.configs and not args.no_reload:
+        from midi_event_remapper.reloader import ConfigReloader
+        reloader = ConfigReloader(
+            paths         = [p for p in args.configs],
+            global_config = global_config,
+            debug         = bool(args.debug),
+        )
+        reloader.start()
+        print("[reload] Watching config files for changes.")
+
     try:
         dispatcher.run()
     finally:
+        if reloader is not None:
+            reloader.stop()
         if display is not None:
             display.stop()
 

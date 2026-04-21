@@ -53,7 +53,9 @@ Command-line reference
     One or more ``.py`` config files (see below).  Each file defines one
     or more BankSets.  Files are checked in order -- the first BankSet
     that matches an incoming event handles it.  If no files are given,
-    the built-in ``config.py`` settings are used.
+    the built-in ``config.py`` settings are used.  When files are given,
+    they are watched for changes and reloaded automatically (see
+    `Live reloading`_).
 
 **Options**
 
@@ -94,6 +96,11 @@ Command-line reference
 
 ``--chord-ms MS``
     Override the chord detection window.
+
+``--no-reload``
+    Disable live config file reloading.  By default, any config files
+    passed on the command line are watched for changes and reloaded
+    automatically while the program runs (see `Live reloading`_ below).
 
 Config files
 ------------
@@ -482,6 +489,36 @@ sooperlooper        Dark teal
 
 Colours can be customised by editing ``BANK_COLOURS`` in
 ``bank_display.py``.
+
+Live reloading
+--------------
+
+When one or more config files are passed on the command line,
+``midi-remapper`` watches them for changes and reloads them automatically
+while the program is running.  This makes it easy to experiment with
+mappings without restarting:
+
+1. Start ``midi-remapper`` as usual::
+
+       midi-remapper mycontroller.py
+
+2. Edit and save ``mycontroller.py`` in your text editor.
+3. The program detects the change within about one second and prints::
+
+       [reload] mycontroller.py changed, reloading...
+       [reload] mycontroller.py: OK  (active banks: mycontroller=default)
+
+   Your new mappings take effect immediately.
+
+If the file contains a syntax or validation error, the current config is
+kept and an error message is printed -- the program keeps running on the
+last good config.  Fix the error and save again to retry.
+
+The currently active bank is preserved across reloads when the bank name
+still exists in the new config.  If you rename or remove the active bank,
+the BankSet resets to its ``active_bank`` setting (usually ``"default"``).
+
+Pass ``--no-reload`` to disable file watching entirely.
 
 JACK connection
 ---------------
