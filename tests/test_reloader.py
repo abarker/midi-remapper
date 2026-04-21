@@ -53,10 +53,10 @@ def make_temp_config(content):
     return Path(f.name)
 
 
-def make_reloader(paths, banksets, **kwargs):
+def make_reloader(paths, banksets, display=None, **kwargs):
     """Build a ConfigReloader with a SimpleNamespace global_config."""
     cfg = make_global_config(banksets)
-    rl  = ConfigReloader(paths, cfg, **kwargs)
+    rl  = ConfigReloader(paths, cfg, display=display, **kwargs)
     return rl, cfg
 
 
@@ -229,14 +229,15 @@ class TestReloadCycle:
     def test_display_fn_transferred(self):
         path = make_temp_config(simple_config_text())
         bs, _ = make_bankset({"default": {}})
-        called = []
-        bs._display_fn = called.append
+        sentinel = lambda *args: None
+        bs._display_fn = sentinel
 
         rl, gcfg = make_reloader([path], [bs])
         gcfg.BANK_SETS = [bs]
         rl._reload([path])
 
-        assert gcfg.BANK_SETS[0]._display_fn == called.append
+        # The function object is transferred to the new BankSet.
+        assert gcfg.BANK_SETS[0]._display_fn is sentinel
         path.unlink()
 
     def test_parse_error_keeps_old_config(self):
@@ -322,4 +323,260 @@ class TestReloaderThread:
         rl.start()
         rl.stop()
         assert not rl._thread.is_alive()
+        path.unlink()
+
+
+class TestDisplayStyles:
+
+    def test_display_stripped_from_bank(self):
+        """_display is removed from the bank mapping dict by the loader."""
+        content = '\n'.join([
+            '{',
+            '    "name": "test",',
+            '    "banks": {',
+            '        "default": {',
+            '            "_display": {"bg": "#1a2e1a", "fg": "#a0ffb0"},',
+            '            "CC0": [{"send": "CC4", "press_only": True}],',
+            '        },',
+            '    },',
+            '}',
+        ])
+        path = make_temp_config(content)
+        from midi_event_remapper.loader import load_bankset_file
+        (bs,) = load_bankset_file(path)
+        assert "_display" not in bs.banks["default"]
+        assert bs._display_styles["default"]["bg"] == "#1a2e1a"
+        path.unlink()
+
+    def test_display_style_passed_on_switch(self):
+        """switch_bank passes the correct style dict to _display_fn."""
+        content = '\n'.join([
+            '{',
+            '    "name": "test",',
+            '    "banks": {',
+            '        "default": {},',
+            '        "drums": {',
+            '            "_display": {"bg": "#1a2e1a", "fg": "#a0ffb0"},',
+            '        },',
+            '    },',
+            '}',
+        ])
+        path = make_temp_config(content)
+        from midi_event_remapper.loader import load_bankset_file
+        (bs,) = load_bankset_file(path)
+        calls = []
+        bs._display_fn = lambda *args: calls.append(args)
+        bs.switch_bank("drums")
+        assert len(calls) == 1
+        assert calls[0][2] == {"bg": "#1a2e1a", "fg": "#a0ffb0"}
+        path.unlink()
+
+    def test_no_display_key_gives_none_style(self):
+        """A bank without _display passes None as the style to _display_fn."""
+        content = '\n'.join([
+            '{',
+            '    "name": "test",',
+            '    "banks": {',
+            '        "default": {},',
+            '        "other": {},',
+            '    },',
+            '}',
+        ])
+        path = make_temp_config(content)
+        from midi_event_remapper.loader import load_bankset_file
+        (bs,) = load_bankset_file(path)
+        calls = []
+        bs._display_fn = lambda *args: calls.append(args)
+        bs.switch_bank("other")
+        assert calls[0][2] is None
+        path.unlink()
+
+    def test_reload_applies_new_styles_immediately(self):
+        """After a reload the display is updated with the new style at once.
+
+        The update goes through _refresh_display which calls display.update()
+        directly, not through bs._display_fn.
+        """
+        content_before = '\n'.join([
+            '{',
+            '    "name": "test",',
+            '    "banks": {"default": {}},',
+            '}',
+        ])
+        content_after = '\n'.join([
+            '{',
+            '    "name": "test",',
+            '    "banks": {',
+            '        "default": {',
+            '            "_display": {"bg": "#ff0000"},',
+            '        },',
+            '    },',
+            '}',
+        ])
+        path = make_temp_config(content_before)
+        from midi_event_remapper.loader import load_bankset_file
+        (bs,) = load_bankset_file(path)
+
+        # Build a minimal display stub with current_bankset_name tracking.
+        import types
+        display = types.SimpleNamespace(
+            current_bankset_name = "test",
+            calls = [],
+        )
+        display.update = lambda *args: display.calls.append(args)
+
+        rl, gcfg = make_reloader([path], [bs], interval_s=0.05, display=display)
+        gcfg.BANK_SETS = [bs]
+        write_config(path, content_after)
+        rl._reload([path])
+
+        assert len(display.calls) == 1
+        assert display.calls[-1][2] == {"bg": "#ff0000"}
+        path.unlink()
+
+
+class TestTransferStateNameMatch:
+
+    def test_active_bank_not_copied_from_fallback_bankset(self):
+        """Active bank must only be preserved when BankSet names match.
+
+        If a new BankSet has no name match in the old config, the fallback
+        old BankSet must not donate its active bank to the new one.
+        """
+        # Old config: one bankset "alpha" on bank "special".
+        content_old = '\n'.join([
+            '{',
+            '    "name": "alpha",',
+            '    "banks": {',
+            '        "default": {},',
+            '        "special": {},',
+            '    },',
+            '}',
+        ])
+        # New config: completely different bankset name "beta".
+        content_new = '\n'.join([
+            '{',
+            '    "name": "beta",',
+            '    "active_bank": "default",',
+            '    "banks": {',
+            '        "default": {},',
+            '        "other": {},',
+            '    },',
+            '}',
+        ])
+        path_old = make_temp_config(content_old)
+        path_new = make_temp_config(content_new)
+
+        from midi_event_remapper.loader import load_bankset_file
+        (old_bs,) = load_bankset_file(path_old)
+        old_bs.active_bank = "special"
+
+        rl, gcfg = make_reloader([path_new], [old_bs], interval_s=0.05)
+        gcfg.BANK_SETS = [old_bs]
+        rl._reload([path_new])
+
+        # "beta" must start on its own configured active_bank, not "special".
+        assert gcfg.BANK_SETS[0].active_bank == "default"
+        path_old.unlink()
+        path_new.unlink()
+
+
+class TestRefreshDisplay:
+    """Tests for the single targeted display update after reload."""
+
+    def _make_display_stub(self, current_name=None):
+        import types
+        d = types.SimpleNamespace(
+            current_bankset_name = current_name,
+            calls                = [],
+        )
+        d.update = lambda *args: d.calls.append(args)
+        return d
+
+    def test_shows_currently_displayed_bankset(self):
+        """Reload pushes update for the bankset currently shown, not the last one."""
+        # Two banksets: "global" (1 bank) then "actition" (2 banks) --
+        # same order as the real actition.py config.
+        global_content = '\n'.join([
+            '{',
+            '    "name": "global",',
+            '    "banks": {"default": {}},',
+            '}',
+        ])
+        actition_content = '\n'.join([
+            '{',
+            '    "name": "actition",',
+            '    "banks": {"default": {}, "drums": {}},',
+            '    "active_bank": "drums",',
+            '}',
+        ])
+        # Pack both into one file as a list, actition first (like the real config).
+        combined = '\n'.join([
+            '[',
+            '{',
+            '    "name": "actition",',
+            '    "banks": {"default": {}, "drums": {}},',
+            '    "active_bank": "drums",',
+            '},',
+            '{',
+            '    "name": "global",',
+            '    "banks": {"default": {}},',
+            '},',
+            ']',
+        ])
+        path = make_temp_config(combined)
+        from midi_event_remapper.loader import load_bankset_file
+        banksets = load_bankset_file(path)   # [actition_bs, global_bs]
+
+        # Display is currently showing "actition".
+        display = self._make_display_stub(current_name="actition")
+
+        rl, gcfg = make_reloader([path], banksets,
+                                  display=display, interval_s=0.05)
+        gcfg.BANK_SETS = list(banksets)
+        rl._reload([path])
+
+        # Exactly one update, and it must be for "actition", not "global".
+        assert len(display.calls) == 1
+        assert display.calls[0][0] == "actition"
+        path.unlink()
+
+    def test_falls_back_to_multi_bank_when_no_current_match(self):
+        """Falls back to the first multi-bank bankset when display has no match."""
+        combined = '\n'.join([
+            '[',
+            '{',
+            '    "name": "single",',
+            '    "banks": {"default": {}},',
+            '},',
+            '{',
+            '    "name": "multi",',
+            '    "banks": {"default": {}, "layer2": {}},',
+            '},',
+            ']',
+        ])
+        path = make_temp_config(combined)
+        from midi_event_remapper.loader import load_bankset_file
+        banksets = load_bankset_file(path)
+
+        # Display was showing something that no longer exists.
+        display = self._make_display_stub(current_name="gone")
+
+        rl, gcfg = make_reloader([path], banksets,
+                                  display=display, interval_s=0.05)
+        gcfg.BANK_SETS = list(banksets)
+        rl._reload([path])
+
+        assert len(display.calls) == 1
+        assert display.calls[0][0] == "multi"
+        path.unlink()
+
+    def test_no_update_when_display_is_none(self):
+        """No display push when no display is attached to the reloader."""
+        path = make_temp_config(simple_config_text())
+        bs, _ = make_bankset({"default": {}})
+        rl, gcfg = make_reloader([path], [bs], display=None, interval_s=0.05)
+        gcfg.BANK_SETS = [bs]
+        # Should complete without error and without touching any display.
+        rl._reload([path])
         path.unlink()

@@ -62,6 +62,24 @@ fall back to the values in config.py:
     "debounce_ms"
     "debug"
     "data_offset"
+    "_display" key          per-bank visual style for the display window,
+                            placed inside each bank dict (not at the BankSet
+                            level).  Recognised keys: "bg", "fg", "font_size",
+                            "width", "height".  Omitted keys fall back to the
+                            module defaults in bank_display.py.  Example:
+                                "banks": {
+                                    "default": {
+                                        "_display": {"bg": "#1a1a2e",
+                                                     "fg": "#e0e0ff"},
+                                        "CC0": [...],
+                                    },
+                                    "drums": {
+                                        "_display": {"bg": "#1a2e1a",
+                                                     "fg": "#a0ffb0",
+                                                     "font_size": 80},
+                                        "CC0": [...],
+                                    },
+                                }
 """
 import ast
 import textwrap
@@ -104,10 +122,16 @@ def _make_bankset(data, default_name):
             f"BankSet {data['name']!r} is missing required 'banks' key"
         )
 
-    data["banks"] = {
-        bank_name: _convert_keys(bank)
-        for bank_name, bank in data["banks"].items()
-    }
+    # Strip "_display" from each bank dict and collect into display_styles.
+    # The BankSet itself never sees "_display" as an entry key.
+    display_styles = {}
+    converted_banks = {}
+    for bank_name, bank in data["banks"].items():
+        bank = dict(bank)
+        if "_display" in bank:
+            display_styles[bank_name] = bank.pop("_display")
+        converted_banks[bank_name] = _convert_keys(bank)
+    data["banks"] = converted_banks
 
     return BankSet(
         name                  = data["name"],
@@ -126,6 +150,7 @@ def _make_bankset(data, default_name):
                                          global_config.CHORD_WINDOW_MS),
         long_press_ms         = data.get("long_press_ms",
                                          global_config.LONG_PRESS_MS),
+        display_styles        = display_styles,
     )
 
 

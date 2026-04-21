@@ -297,11 +297,14 @@ def main():
             # Show initial state.
             for bs in banksets:
                 if bs.active_bank != "default" or len(bs.banks) > 1:
-                    display.update(bs.name, bs.active_bank)
+                    display.update(bs.name, bs.active_bank,
+                                   bs._display_styles.get(bs.active_bank))
                     break
             else:
                 if banksets:
-                    display.update(banksets[0].name, banksets[0].active_bank)
+                    bs = banksets[0]
+                    display.update(bs.name, bs.active_bank,
+                                   bs._display_styles.get(bs.active_bank))
         except ImportError:
             print(
                 "[cli] WARNING: tkinter is not available -- "
@@ -317,6 +320,7 @@ def main():
         reloader = ConfigReloader(
             paths         = [p for p in args.configs],
             global_config = global_config,
+            display       = display,
             debug         = bool(args.debug),
         )
         reloader.start()

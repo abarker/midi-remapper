@@ -986,3 +986,98 @@ class TestBankSwitch:
         bs, _ = make_bankset({"default": {}})
         with pytest.raises(ValueError, match="unknown bank"):
             bs.switch_bank("nonexistent")
+
+
+class TestCancelTimersActive:
+    """Tests that _active flag prevents zombie timer callbacks after cancel."""
+
+    def test_active_true_on_init(self):
+        bs, _ = make_bankset({"default": {}})
+        assert bs._active is True
+
+    def test_cancel_timers_sets_active_false(self):
+        bs, _ = make_bankset({"default": {}})
+        bs.cancel_timers()
+        assert bs._active is False
+
+    def test_repeat_does_not_fire_after_cancel(self, fake_timer):
+        """Repeat timer that fires after cancel_timers must not reschedule."""
+        bs, captured = make_bankset({
+            "default": {
+                "CC1": {
+                    "repeat":          [{"send": "CC10", "value": 127}],
+                    "repeat_delay_ms": 200,
+                    "repeat_ms":       80,
+                },
+            }
+        })
+        bs.handle(make_cc(1, value=127))
+        assert len(fake_timer.active()) == 1
+
+        # Simulate: cancel is called while the timer is already executing.
+        bs.cancel_timers()
+        assert bs._active is False
+
+        # Fire the timer that was "already in flight" at cancel time.
+        timer_count_before = len(fake_timer.instances)
+        fake_timer.instances[0].fire()
+
+        # No new timer should have been created (repeat did not reschedule).
+        assert len(fake_timer.instances) == timer_count_before
+        # And nothing should have been output.
+        assert captured == []
+
+    def test_long_does_not_fire_after_cancel(self, fake_timer):
+        """Long-press timer that fires after cancel_timers must not output."""
+        bs, captured = make_bankset({
+            "default": {
+                "CC1": {
+                    "single": [{"send": "CC10", "value": 127}],
+                    "long":   [{"send": "CC20", "value": 127}],
+                },
+            }
+        })
+        bs.handle(make_cc(1, value=127))
+        long_timer = fake_timer.instances[-1]
+
+        bs.cancel_timers()
+        long_timer.fire()   # Simulates the race.
+
+        assert captured == []
+
+    def test_gesture_multipress_does_not_fire_after_cancel(self, fake_timer):
+        """Multipress window timer that fires after cancel must not output."""
+        bs, captured = make_bankset({
+            "default": {
+                "CC1": {
+                    "single": [{"send": "CC10", "value": 127}],
+                    "double": [{"send": "CC20", "value": 127}],
+                },
+            }
+        })
+        bs.handle(make_cc(1, value=127))
+        window_timer = fake_timer.instances[-1]
+
+        bs.cancel_timers()
+        window_timer.fire()
+
+        assert captured == []
+
+    def test_chord_expire_does_not_dispatch_after_cancel(self, fake_timer):
+        """Chord expiry timer that fires after cancel must not dispatch."""
+        bs, captured = make_bankset({
+            "default": {
+                ("CC1", "CC2"): {
+                    "single": [{"send": "CC30", "value": 127}],
+                },
+                "CC1": [{"send": "CC10", "press_only": True}],
+            }
+        })
+        bs.handle(make_cc(1, value=127))   # Open chord window.
+        expire_timer = fake_timer.instances[-1]
+
+        bs.cancel_timers()
+        expire_timer.fire()   # Expiry fires after cancel.
+
+        # Fallback dispatch of CC1 must not have happened.
+        assert captured == []

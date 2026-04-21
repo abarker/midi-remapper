@@ -137,6 +137,7 @@ Comments use ``#``.  Chord keys use ``+`` notation::
             },
 
             "layer2": {
+                "_display": {"bg": "#2e1a1a", "fg": "#ffb0a0"},
                 "CC3+CC4": {"single": [{"send": "BANK", "bank": "default"}]},
                 "CC0": [{"send": "CC20", "press_only": True}],
                 "CC1": [{"send": "CC21", "press_only": True}],
@@ -474,21 +475,44 @@ The window stays on top of other windows and updates immediately on every
 bank switch, so you can glance at it during a performance to confirm that
 a chord or double-press registered correctly.
 
-The background colour changes with the bank name.  The built-in colour
-scheme is:
+**Per-bank styling**
 
-==================  ================
-Bank name           Background
-==================  ================
-default             Dark blue
-drums               Dark green
-ardour              Dark red
-sooperlooper        Dark teal
-*(any other)*       Black
-==================  ================
+Each bank can define its own background colour, text colour, font size,
+and window dimensions via a ``"_display"`` key placed directly inside the
+bank dict in the config file::
 
-Colours can be customised by editing ``BANK_COLOURS`` in
-``bank_display.py``.
+    "banks": {
+        "default": {
+            "_display": {"bg": "#1a1a2e", "fg": "#e0e0ff"},
+            "CC0": [{"send": "CC10", "press_only": True}],
+        },
+        "drums": {
+            "_display": {"bg": "#1a2e1a", "fg": "#a0ffb0",
+                         "font_size": 80, "width": 400, "height": 200},
+            "CC0": [{"send": "CC11", "press_only": True}],
+        },
+    },
+
+All five keys are optional.  Any key omitted falls back to the defaults
+in ``bank_display.py`` (dark background, white text, 72-point font).
+``"_display"`` is stripped before MIDI mapping lookup and does not
+interfere with any event key.
+
+Style changes take effect immediately on the next bank switch.  When the
+config file is reloaded live, the new styles are applied at once without
+needing to switch banks first.
+
+Available style keys:
+
+==================  ===========================================
+Key                 Effect
+==================  ===========================================
+``bg``              Background colour (any Tk colour string)
+``fg``              Text colour
+``font_size``       Bank-name font size in points
+``width``           Window width in pixels
+``height``          Window height in pixels
+==================  ===========================================
 
 Live reloading
 --------------

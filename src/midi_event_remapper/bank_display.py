@@ -25,21 +25,12 @@ import threading
 import tkinter as tk
 
 
-# Colour pairs (background, foreground) keyed by bank name.
-# Banks not in this dict get the default colour.
-# Extend or replace in your config if desired.
-BANK_COLOURS = {
-    "default":      ("#1a1a2e", "#e0e0ff"),
-    "drums":        ("#1a2e1a", "#a0ffb0"),
-    "ardour":       ("#2e1a1a", "#ffb0a0"),
-    "sooperlooper": ("#1a2a2e", "#a0e8ff"),
-}
-
-DEFAULT_BG = "#1a1a1a"
-DEFAULT_FG = "#ffffff"
+DEFAULT_BG       = "#1a1a1a"
+DEFAULT_FG       = "#ffffff"
+DEFAULT_FONT_SIZE = 72        # Default bank-name font size in points.
 
 FONT_BANKSET = ("Helvetica", 14)
-FONT_BANK    = ("Helvetica", 72, "bold")
+FONT_BANK    = ("Helvetica", DEFAULT_FONT_SIZE, "bold")
 WINDOW_TITLE = "Bank Display"
 POLL_MS      = 50   # How often the Tk event loop checks the queue (ms).
 
@@ -54,6 +45,10 @@ class BankDisplay:
     When ``no_titlebar`` is True the OS window decoration is removed and a
     right-click context menu is provided in its place, with options to
     cancel (dismiss the menu) or exit the program entirely.
+
+    Visual style (colours, font size, window dimensions) is controlled
+    per-bank via the ``style`` argument to :meth:`update`.  Any key
+    omitted from the style dict falls back to the module-level defaults.
     """
 
     def __init__(self, no_titlebar=False):
@@ -61,9 +56,10 @@ class BankDisplay:
         self._thread       = None
         self._root         = None
         self._running      = False
-        self._no_titlebar  = no_titlebar
-        self._drag_x       = 0
-        self._drag_y       = 0
+        self._no_titlebar           = no_titlebar
+        self._drag_x                = 0
+        self._drag_y                = 0
+        self._displayed_bankset_name = None  # name of the bankset currently shown
 
         # Tk StringVars -- created in the Tk thread, stored here for access.
         self._bankset_var   = None
@@ -82,12 +78,17 @@ class BankDisplay:
         )
         self._thread.start()
 
+    @property
+    def current_bankset_name(self):
+        """Name of the bankset currently shown in the window, or None."""
+        return self._displayed_bankset_name
+
     def stop(self):
         """Close the window and stop the background thread."""
         self._running = False
         self._queue.put(None)  # Sentinel to unblock _poll.
 
-    def update(self, bankset_name, bank_name):
+    def update(self, bankset_name, bank_name, style=None):
         """Notify the display of a bank change.  Safe to call from any thread.
 
         Parameters
@@ -96,8 +97,18 @@ class BankDisplay:
             The name of the BankSet that changed.
         bank_name : str
             The new active bank name.
+        style : dict or None
+            Optional visual style for this bank.  Recognised keys:
+
+            ``bg``         -- background colour string (e.g. ``"#1a2e1a"``)
+            ``fg``         -- foreground (text) colour string
+            ``font_size``  -- bank-name font size in points (int)
+            ``width``      -- window width in pixels (int)
+            ``height``     -- window height in pixels (int)
+
+            Omitted keys fall back to the module-level defaults.
         """
-        self._queue.put((bankset_name, bank_name))
+        self._queue.put((bankset_name, bank_name, style))
 
     # ------------------------------------------------------------------
     # Tk thread
@@ -214,23 +225,40 @@ class BankDisplay:
                 if item is None:
                     self._root.destroy()
                     return
-                bankset_name, bank_name = item
-                self._apply_update(bankset_name, bank_name)
+                bankset_name, bank_name, style = item
+                self._apply_update(bankset_name, bank_name, style)
         except queue.Empty:
             pass
         if self._running:
             self._root.after(POLL_MS, self._poll)
 
-    def _apply_update(self, bankset_name, bank_name):
-        """Apply a bank change to the Tk widgets."""
+    def _apply_update(self, bankset_name, bank_name, style):
+        """Apply a bank change to the Tk widgets, using style for visual settings.
+
+        Each key in style is applied only when present; absent keys fall back
+        to module-level defaults so partial style dicts work correctly.
+        """
+        style = style or {}
+        bg        = style.get("bg",        DEFAULT_BG)
+        fg        = style.get("fg",        DEFAULT_FG)
+        font_size = style.get("font_size", DEFAULT_FONT_SIZE)
+
+        self._displayed_bankset_name = bankset_name
         self._bankset_var.set(bankset_name)
         self._bank_var.set(bank_name)
 
-        bg, fg = BANK_COLOURS.get(bank_name, (DEFAULT_BG, DEFAULT_FG))
         self._root.configure(bg=bg)
         self._frame.configure(bg=bg)
-        self._bank_label.configure(bg=bg, fg=fg)
+        self._bank_label.configure(
+            bg=bg, fg=fg,
+            font=(FONT_BANK[0], font_size, FONT_BANK[2]),
+        )
         self._bankset_label.configure(bg=bg)
+
+        if "width" in style or "height" in style:
+            w = style.get("width",  self._root.winfo_width())
+            h = style.get("height", self._root.winfo_height())
+            self._root.geometry(f"{w}x{h}")
 
     def _on_close(self):
         """Handle the window close button (titled mode only)."""

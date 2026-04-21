@@ -34,16 +34,22 @@ class ConfigReloader:
     global_config : module
         The ``midi_event_remapper.config`` module.  Its ``BANK_SETS``
         attribute is replaced atomically on each successful reload.
+    display : BankDisplay or None
+        The active bank display window, if any.  Used to push a single
+        targeted style update after a reload rather than updating every
+        BankSet (which would leave the display on whichever bankset is
+        last in the config list).
     interval_s : float
         Polling interval in seconds (default: 1.0).
     debug : bool
         If True, print extra diagnostic messages.
     """
 
-    def __init__(self, paths, global_config, interval_s=POLL_INTERVAL,
-                 debug=False):
+    def __init__(self, paths, global_config, display=None,
+                 interval_s=POLL_INTERVAL, debug=False):
         self._paths        = [Path(p) for p in paths]
         self._config       = global_config
+        self._display      = display
         self._interval_s   = interval_s
         self._debug        = debug
         self._stop         = threading.Event()
@@ -116,11 +122,45 @@ class ConfigReloader:
         # because dispatcher.main_handler only reads the list, not mutates it.
         self._config.BANK_SETS = new_banksets
 
+        # Push one targeted display update so style changes take effect
+        # immediately.  Pushing for every BankSet would leave the display
+        # on whichever bankset happens to be last in the config list.
+        self._refresh_display(new_banksets)
+
         preserved = [
             f"{bs.name}={bs.active_bank}" for bs in new_banksets
         ]
         print(f"[reload] {changed_names}: OK  "
               f"(active banks: {', '.join(preserved)})")
+
+    def _refresh_display(self, new_banksets):
+        """Push one display update for the bankset currently being shown.
+
+        Chooses the target bankset in priority order:
+
+        1. The bankset whose name matches what is currently on screen (so
+           a reload that only changes colours stays on the same bankset).
+        2. The first bankset that has more than one bank (the "main"
+           multi-bank controller mapping).
+        3. The first bankset in the list.
+        """
+        if self._display is None:
+            return
+
+        current = self._display.current_bankset_name
+        target = next(
+            (bs for bs in new_banksets if bs.name == current), None
+        )
+        if target is None:
+            target = next(
+                (bs for bs in new_banksets if len(bs.banks) > 1), None
+            )
+        if target is None and new_banksets:
+            target = new_banksets[0]
+
+        if target is not None:
+            style = target._display_styles.get(target.active_bank)
+            self._display.update(target.name, target.active_bank, style)
 
     def _try_load_all(self, load_fn):
         """Load all paths, retrying once after RETRY_DELAY_S on failure.
@@ -159,10 +199,13 @@ class ConfigReloader:
             old = old_by_name.get(bs.name, fallback_old)
             if old is None:
                 continue
-            bs._output_fn  = old._output_fn
-            bs._display_fn = old._display_fn
-            # Preserve active bank only when it still exists in new config.
-            if old.name in old_by_name and old.active_bank in bs.banks:
+            bs._output_fn     = old._output_fn
+            bs._display_fn    = old._display_fn
+            # display_styles comes from the new config; do not overwrite it.
+            # Preserve active bank only when names matched AND the bank
+            # still exists in the new config.  The fallback_old path (name
+            # mismatch) must never overwrite the new BankSet's active bank.
+            if bs.name in old_by_name and old.active_bank in bs.banks:
                 bs.active_bank = old.active_bank
 
     def _cancel_old_timers(self):

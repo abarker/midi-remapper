@@ -65,6 +65,11 @@ class BankSet:
     # Config dict keys that are metadata, not action labels.
     _META_KEYS    = frozenset({"long_ms", "trigger_value", "debounce_ms",
                                "repeat_delay_ms", "repeat_ms", "multi_ms"})
+    # Bank-level keys that are not MIDI event mappings and are skipped during
+    # lookup table construction and validation.  "_display" is normally
+    # stripped by the loader before the BankSet is constructed; this acts as
+    # a safety net for BankSets built by other means.
+    _BANK_META_KEYS = frozenset({"_display"})
     # Valid action labels for gesture entries.
     _GESTURE_KEYS = frozenset({"single", "double", "triple", "long", "repeat"})
 
@@ -75,6 +80,7 @@ class BankSet:
         active_bank           = "default",
         output_fn             = None,
         display_fn            = None,
+        display_styles        = None,
         debug                 = False,
         data_offset           = 1,
         debounce_ms           = 60,
@@ -87,7 +93,8 @@ class BankSet:
         self.active_bank = active_bank
 
         self._output_fn             = output_fn
-        self._display_fn            = display_fn  # called on bank switch: fn(bankset_name, bank_name)
+        self._display_fn            = display_fn  # called on bank switch: fn(bankset_name, bank_name, style)
+        self._display_styles        = display_styles or {}  # bank_name -> style dict
         self._debug                 = debug
         self._data_offset           = data_offset
         self._debounce_ms           = debounce_ms
@@ -96,6 +103,10 @@ class BankSet:
         self._long_press_ms         = long_press_ms
         self._repeat_delay_ms       = 500   # default: ms before first repeat
         self._repeat_ms             = 100   # default: ms between repeats
+
+        # Set to False by cancel_timers() so in-flight timer callbacks abort
+        # instead of rescheduling or calling _output_fn on a dead BankSet.
+        self._active = True
 
         # Toggle state. Persists across bank switches intentionally.
         self._toggle_states = {}   # key -> bool (False=a, True=b)
@@ -148,7 +159,12 @@ class BankSet:
 
         Covers gesture (multipress window, long-press, repeat), chord window,
         chord multipress, and any delayed-send timers in _timer_list.
+
+        ``_active`` is cleared first so that any callback already executing
+        when this is called will abort rather than reschedule or call
+        ``_output_fn`` on a dead BankSet.
         """
+        self._active = False   # Must be first -- stops any in-flight reschedule.
         for t in self._gesture_timers.values():
             t.cancel()
         for t in self._gesture_long_timers.values():
@@ -183,7 +199,8 @@ class BankSet:
         self.active_bank = name
         if self._display_fn is not None:
             try:
-                self._display_fn(self.name, name)
+                style = self._display_styles.get(name)
+                self._display_fn(self.name, name, style)
             except Exception:
                 pass  # never let display errors crash the MIDI handler
 
@@ -452,6 +469,8 @@ class BankSet:
 
         for bank_name, bank in self.banks.items():
             for key, value in bank.items():
+                if key in self._BANK_META_KEYS:
+                    continue
                 check_entry(key, value, bank_name)
 
         if self.active_bank not in self.banks:
@@ -480,6 +499,8 @@ class BankSet:
         for bank_name, bank in self.banks.items():
             self._chord_members[bank_name] = {}
             for key, value in bank.items():
+                if key in self._BANK_META_KEYS:
+                    continue
                 try:
                     etype = self._classify(key, value)
                 except ValueError:
@@ -703,6 +724,8 @@ class BankSet:
         threshold_s = entry.get("long_ms", self._long_press_ms) / 1000.0
 
         def fire_long(key_=key, entry_=entry, ev_=event):
+            if not self._active:
+                return
             self._gesture_long_timers.pop(key_, None)
             self._gesture_long_fired.add(key_)
             # Also cancel any pending multipress timer.
@@ -743,6 +766,8 @@ class BankSet:
         )
 
         def fire_repeat(key_=key, entry_=entry, ev_=event):
+            if not self._active:
+                return
             self._gesture_repeat_timers.pop(key_, None)
             # If the key was already released, do nothing.
             if key_ not in self._gesture_press_time:
@@ -863,6 +888,8 @@ class BankSet:
             existing.cancel()
 
         def fire(key_=key, entry_=entry):
+            if not self._active:
+                return
             count = self._gesture_counts.pop(key_, 1)
             ev    = self._gesture_events.pop(key_, event)
             self._gesture_timers.pop(key_, None)
@@ -1076,6 +1103,8 @@ class BankSet:
                 # First key of this chord -- open the window.
                 def make_expire(fk_=fk):
                     def expire():
+                        if not self._active:
+                            return
                         dropped = self._chord_pending.pop(fk_, None)
                         if dropped is None:
                             return
@@ -1194,6 +1223,8 @@ class BankSet:
             count = state["count"] + 1
 
         def fire(fk_=fk, entry_=entry, count_=count, ev_=event):
+            if not self._active:
+                return
             self._chord_counts.pop(fk_, None)
             label = {1: "single", 2: "double", 3: "triple"}.get(count_)
             if self._debug:
