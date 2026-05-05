@@ -580,3 +580,77 @@ class TestRefreshDisplay:
         # Should complete without error and without touching any display.
         rl._reload([path])
         path.unlink()
+
+
+class TestWatcherRobustness:
+
+    def test_watcher_survives_reload_exception(self):
+        """An unexpected exception in _reload must not kill the watcher thread."""
+        path = make_temp_config(simple_config_text())
+        bs, _ = make_bankset({"default": {}})
+        rl, gcfg = make_reloader([path], [bs], interval_s=0.05)
+        gcfg.BANK_SETS = [bs]
+        rl.start()
+
+        try:
+            # Patch _reload to raise on the first call, then succeed.
+            calls = []
+            original_reload = rl._reload
+
+            def flaky(changed):
+                calls.append(len(calls))
+                if len(calls) == 1:
+                    raise RuntimeError("simulated unexpected error")
+                original_reload(changed)
+
+            rl._reload = flaky
+
+            # Touch the file to trigger a reload.
+            import time
+            time.sleep(0.1)
+            write_config(path, simple_config_text(cc_send="CC50"))
+            time.sleep(0.4)
+
+            # Thread must still be alive after the exception.
+            assert rl._thread.is_alive()
+        finally:
+            rl.stop()
+            path.unlink()
+
+    def test_cancelled_bankset_does_not_emit_on_delayed_send(self, fake_timer):
+        """A delayed-send timer that fires after cancel_timers must not emit."""
+        bs, captured = make_bankset({
+            "default": {
+                "CC1": [{"send": "CC10", "value": 127, "delay": 0.5}],
+            }
+        })
+        bs.handle(make_cc(1, value=127))
+        # One delayed-send timer should be pending.
+        assert len(fake_timer.active()) == 1
+        delayed_timer = fake_timer.instances[-1]
+
+        bs.cancel_timers()
+        assert bs._active is False
+
+        delayed_timer.fire()   # Simulates the race.
+
+        assert captured == []
+
+    def test_fire_sequence_suppressed_after_cancel(self, fake_timer):
+        """_fire_sequence must not call _output_fn after cancel_timers."""
+        bs, captured = make_bankset({
+            "default": {
+                "CC1": {
+                    "single": [{"send": "CC10", "value": 127}],
+                    "double": [{"send": "CC20", "value": 127}],
+                },
+            }
+        })
+        bs.handle(make_cc(1, value=127))
+        window_timer = fake_timer.instances[-1]
+
+        # Simulate: timer fires just as cancel is called.
+        bs._active = False   # cancel_timers sets this first
+        window_timer.fire()  # gesture multipress fire -> calls _fire_sequence
+
+        assert captured == []

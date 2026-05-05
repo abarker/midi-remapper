@@ -82,14 +82,18 @@ class ConfigReloader:
     def _watch(self):
         """Poll for mtime changes and trigger reloads (runs in background)."""
         while not self._stop.wait(self._interval_s):
-            new_mtimes = self._current_mtimes()
-            changed = [
-                p for p in self._paths
-                if new_mtimes.get(p) != self._last_mtimes.get(p)
-            ]
-            if changed:
-                self._last_mtimes = new_mtimes
-                self._reload(changed)
+            try:
+                new_mtimes = self._current_mtimes()
+                changed = [
+                    p for p in self._paths
+                    if new_mtimes.get(p) != self._last_mtimes.get(p)
+                ]
+                if changed:
+                    self._last_mtimes = new_mtimes
+                    self._reload(changed)
+            except Exception as e:
+                # Never let an unexpected error kill the reloader thread.
+                print(f"[reload] ERROR in watcher: {e}")
 
     # ------------------------------------------------------------------
     # Reload logic
@@ -116,11 +120,16 @@ class ConfigReloader:
             return
 
         self._transfer_state(new_banksets)
-        self._cancel_old_timers()
 
-        # Atomic swap -- the GIL makes list assignment atomic enough here
-        # because dispatcher.main_handler only reads the list, not mutates it.
+        # Capture old BankSets before the swap so _cancel_old_timers()
+        # still has a reference to them after BANK_SETS is replaced.
+        # The swap must come first: once main_handler points to new_banksets
+        # it will never call handle() on the old BankSets again, so
+        # cancel_timers() has exclusive access to the old state with no
+        # risk of a concurrent handle() interleaving with it.
+        old_banksets = list(self._config.BANK_SETS)
         self._config.BANK_SETS = new_banksets
+        self._cancel_old_timers(old_banksets)
 
         # Push one targeted display update so style changes take effect
         # immediately.  Pushing for every BankSet would leave the display
@@ -208,9 +217,9 @@ class ConfigReloader:
             if bs.name in old_by_name and old.active_bank in bs.banks:
                 bs.active_bank = old.active_bank
 
-    def _cancel_old_timers(self):
-        """Cancel all in-flight timers on the current BankSets."""
-        for bs in self._config.BANK_SETS:
+    def _cancel_old_timers(self, old_banksets):
+        """Cancel all in-flight timers on the old BankSets."""
+        for bs in old_banksets:
             bs.cancel_timers()
 
     # ------------------------------------------------------------------

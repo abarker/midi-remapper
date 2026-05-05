@@ -92,20 +92,27 @@ def main_handler(event):
     returns a non-None result handles the event; remaining BankSets are
     skipped.  If no BankSet matches, the event is passed through
     unchanged.
+
+    Exceptions are caught and printed rather than propagated into the
+    mididings event loop, where the behaviour on an unhandled exception
+    is undefined and could silently stop all MIDI output.
     """
     if config.DEBUG:
         print(f"[in] channel={event.channel} type={event.type} {event}")
 
-    for bankset in config.BANK_SETS:
-        result = bankset.handle(event)
-        if result is not None:
-            if config.DEBUG:
-                print(
-                    f"  [dispatch] handled by BankSet {bankset.name!r}"
-                )
-            return result
+    try:
+        for bankset in config.BANK_SETS:
+            result = bankset.handle(event)
+            if result is not None:
+                if config.DEBUG:
+                    print(
+                        f"  [dispatch] handled by BankSet {bankset.name!r}"
+                    )
+                return result
+    except Exception as e:
+        print(f"[handler] ERROR: {e}")
 
-    return event   # pass through unchanged
+    return event   # pass through unchanged (also the safe fallback on error)
 
 
 def run():

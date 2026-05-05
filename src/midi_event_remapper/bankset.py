@@ -579,7 +579,10 @@ class BankSet:
             else:
                 if self._debug:
                     print(f"  [seq] -> in {delay:.3f}s: {ev_out}")
-                t = threading.Timer(delay, self._output_fn, args=(ev_out,))
+                def _emit(ev=ev_out):
+                    if self._active:
+                        self._output_fn(ev)
+                t = threading.Timer(delay, _emit)
                 t.daemon = True
                 t.start()
                 self._timer_list.append(t)
@@ -626,7 +629,12 @@ class BankSet:
         Like _execute_sequence but routes immediate events through
         self._output_fn.  Used from timer callbacks where returning a
         value to mididings is not possible.
+
+        Checks ``_active`` before emitting so that a callback which races
+        past its own guard does not reach ``engine.output_event``.
         """
+        if not self._active:
+            return
         result = self._execute_sequence(seq, event)
         if result:
             for ev_out in result:
@@ -1068,7 +1076,8 @@ class BankSet:
         bank      = self.banks[bank_name]
         etype     = self._entry_types.get((bank_name, k))
         if etype is None:
-            self._output_fn(ev)
+            if self._active and self._output_fn is not None:
+                self._output_fn(ev)
         elif etype == "direct":
             self._fire_sequence(bank[k], ev)
         elif etype == "toggle":
