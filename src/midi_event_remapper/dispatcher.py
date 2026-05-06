@@ -96,6 +96,12 @@ def main_handler(event):
     Exceptions are caught and printed rather than propagated into the
     mididings event loop, where the behaviour on an unhandled exception
     is undefined and could silently stop all MIDI output.
+
+    Debug output at this level is gated on ``config.DEBUG`` (the global
+    dispatcher flag), set via ``DEBUG`` in ``config.py``, ``--debug`` on
+    the CLI, or ``"debug": True`` in the global settings block of a config
+    file.  BankSet-internal detail (gesture timing, chord windows, etc.)
+    is gated on the per-BankSet ``bs._debug`` flag and is independent.
     """
     if config.DEBUG:
         print(f"[in] channel={event.channel} type={event.type} {event}")

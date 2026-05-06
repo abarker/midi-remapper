@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 from conftest import make_cc
 
-from midi_event_remapper.loader import load_bankset_file, _parse_chord_key, _convert_keys
+from midi_event_remapper.loader import load_bankset_file, LoadResult, _parse_chord_key, _convert_keys
 
 
 # ---------------------------------------------------------------------------
@@ -80,7 +80,7 @@ class TestLoadBanksetFile:
         }
         ''')
         result = load_bankset_file(path)
-        bs = result[0]
+        bs = result.banksets[0]
         assert bs.name == "test"
         assert bs.active_bank == "default"
 
@@ -94,7 +94,7 @@ class TestLoadBanksetFile:
         named = path.parent / "mycontroller.py"
         path.rename(named)
         result = load_bankset_file(named)
-        bs = result[0]
+        bs = result.banksets[0]
         assert bs.name == "mycontroller"
 
     def test_chord_keys_converted(self):
@@ -109,7 +109,7 @@ class TestLoadBanksetFile:
         }
         ''')
         result = load_bankset_file(path)
-        bs = result[0]
+        bs = result.banksets[0]
         bank = bs.banks["default"]
         # Should have a tuple key
         assert any(isinstance(k, tuple) for k in bank.keys())
@@ -126,12 +126,12 @@ class TestLoadBanksetFile:
         }
         ''')
         captured = []
-        result = load_bankset_file(path)
-        bs = result[0]
+        load_result = load_bankset_file(path)
+        bs = load_result.banksets[0]
         bs.set_output_fn(captured.append)
-        result = bs.handle(make_cc(0, value=127))
-        assert result is not None
-        assert result[0].ctrl == 4
+        handle_result = bs.handle(make_cc(0, value=127))
+        assert handle_result is not None
+        assert handle_result[0].ctrl == 4
 
     def test_active_bank_respected(self):
         path = write_config('''
@@ -145,7 +145,7 @@ class TestLoadBanksetFile:
         }
         ''')
         result = load_bankset_file(path)
-        bs = result[0]
+        bs = result.banksets[0]
         assert bs.active_bank == "other"
 
     def test_timing_override(self):
@@ -159,7 +159,7 @@ class TestLoadBanksetFile:
         }
         ''')
         result = load_bankset_file(path)
-        bs = result[0]
+        bs = result.banksets[0]
         assert bs._long_press_ms         == 250
         assert bs._multi_press_window_ms == 200
         assert bs._chord_window_ms       == 50
@@ -175,7 +175,7 @@ class TestLoadBanksetFile:
 
     def test_non_dict_content_raises_valueerror(self):
         path = write_config("[1, 2, 3]")
-        with pytest.raises(ValueError, match="must contain a dict"):
+        with pytest.raises(ValueError, match="list items must all be dicts"):
             load_bankset_file(path)
 
     def test_missing_banks_key_raises_valueerror(self):
@@ -195,7 +195,7 @@ class TestLoadBanksetFile:
         }
         ''')
         result = load_bankset_file(path)
-        bs = result[0]
+        bs = result.banksets[0]
         errors = bs.validate()
         assert any("missing required 'send'" in e for e in errors)
 
@@ -217,11 +217,84 @@ class TestLoadBanksetFile:
         ]
         ''')
         result = load_bankset_file(path)
-        assert len(result) == 2
-        assert result[0].name == "global"
-        assert result[1].name == "actition"
+        assert len(result.banksets) == 2
+        assert result.banksets[0].name == "global"
+        assert result.banksets[1].name == "actition"
 
     def test_empty_list_raises(self):
         path = write_config('[]')
         with pytest.raises(ValueError, match="empty list"):
             load_bankset_file(path)
+
+
+class TestGlobalSettingsBlock:
+
+    def test_settings_block_sets_debug(self):
+        """A settings block with "debug" is parsed into result.settings."""
+        content = '\n'.join([
+            '[',
+            '    {"debug": True},',
+            '    {"name": "test", "banks": {"default": {}}},',
+            ']',
+        ])
+        path = write_config(content)
+        result = load_bankset_file(path)
+        assert result.settings == {"debug": True}
+        assert len(result.banksets) == 1
+        path.unlink()
+
+    def test_no_settings_block_gives_empty_settings(self):
+        """A list with no settings block returns an empty settings dict."""
+        content = '\n'.join([
+            '[',
+            '    {"name": "test", "banks": {"default": {}}},',
+            ']',
+        ])
+        path = write_config(content)
+        result = load_bankset_file(path)
+        assert result.settings == {}
+        assert len(result.banksets) == 1
+        path.unlink()
+
+    def test_single_dict_file_gives_empty_settings(self):
+        """A single-dict file always returns an empty settings dict."""
+        content = '{"name": "test", "banks": {"default": {}}}'
+        path = write_config(content)
+        result = load_bankset_file(path)
+        assert result.settings == {}
+        assert len(result.banksets) == 1
+        path.unlink()
+
+    def test_settings_block_false_debug(self):
+        """A settings block with "debug": False is also valid."""
+        content = '\n'.join([
+            '[',
+            '    {"debug": False},',
+            '    {"name": "test", "banks": {"default": {}}},',
+            ']',
+        ])
+        path = write_config(content)
+        result = load_bankset_file(path)
+        assert result.settings["debug"] is False
+        path.unlink()
+
+    def test_settings_block_unknown_key_raises(self):
+        """An unrecognised key in a settings block raises ValueError."""
+        content = '\n'.join([
+            '[',
+            '    {"debug": True, "typo_key": 99},',
+            '    {"name": "test", "banks": {"default": {}}},',
+            ']',
+        ])
+        path = write_config(content)
+        with pytest.raises(ValueError, match="unknown global settings key"):
+            load_bankset_file(path)
+        path.unlink()
+
+    def test_settings_only_list_raises(self):
+        """A list with only a settings block and no BankSets raises ValueError."""
+        content = '[{"debug": True}]'
+        path = write_config(content)
+        with pytest.raises(ValueError, match="no BankSets follow"):
+            load_bankset_file(path)
+        path.unlink()

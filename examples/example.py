@@ -26,8 +26,28 @@
 # "CC1+CC2" key          -> chord: all keys must arrive within chord_window_ms
 #
 # See the README or config.py for the full schema.
+#
+# DEBUG LEVELS
+# Two independent debug flags exist:
+#   config.DEBUG (global)  -- controls dispatcher output: [in], [dispatch],
+#                             and startup messages.  Set via the "debug" key
+#                             in the global settings block below, or with
+#                             --debug on the command line.
+#   BankSet._debug         -- controls BankSet internals: gesture timing,
+#                             chord windows, sequence dispatch detail.
+#                             Set via "debug": True inside a BankSet dict.
+#   --debug CLI flag       -- sets both levels simultaneously.
 
 [
+
+# ==========================================================================
+# Global settings block (optional, list format only).
+# Must be the first item in the list and must not have a "banks" key.
+# Hot-reloadable: changes take effect within one second without restart.
+# ==========================================================================
+# {
+#     "debug": False,   # sets config.DEBUG (dispatcher-level output)
+# },
 
 # ==========================================================================
 # BankSet 1 -- global: always-active mappings checked before all others.

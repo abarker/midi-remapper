@@ -106,9 +106,10 @@ class ConfigReloader:
         changed_names = ", ".join(p.name for p in changed_paths)
         print(f"\n[reload] {changed_names} changed, reloading...")
 
-        new_banksets = self._try_load_all(load_bankset_file)
-        if new_banksets is None:
+        load_result = self._try_load_all(load_bankset_file)
+        if load_result is None:
             return   # Error already printed; keep current config.
+        new_settings, new_banksets = load_result
 
         errors = []
         for bs in new_banksets:
@@ -130,6 +131,13 @@ class ConfigReloader:
         old_banksets = list(self._config.BANK_SETS)
         self._config.BANK_SETS = new_banksets
         self._cancel_old_timers(old_banksets)
+
+        # Apply global settings from the reloaded config.  "debug" changes
+        # config.DEBUG, making dispatcher-level debug hot-reloadable.
+        # The CLI --debug / --no-debug flags are not re-applied here; they
+        # are only set once at startup in cli.py and take permanent precedence.
+        if "debug" in new_settings:
+            self._config.DEBUG = new_settings["debug"]
 
         # Push one targeted display update so style changes take effect
         # immediately.  Pushing for every BankSet would leave the display
@@ -174,14 +182,19 @@ class ConfigReloader:
     def _try_load_all(self, load_fn):
         """Load all paths, retrying once after RETRY_DELAY_S on failure.
 
-        Returns a flat list of BankSet instances, or None if loading fails.
+        Returns ``(merged_settings, banksets)`` on success, or ``None`` on
+        failure.  Settings dicts from multiple files are merged left-to-right
+        (later files win).
         """
         for attempt in range(2):
             try:
+                merged   = {}
                 banksets = []
                 for path in self._paths:
-                    banksets.extend(load_fn(path))
-                return banksets
+                    result = load_fn(path)
+                    merged.update(result.settings)
+                    banksets.extend(result.banksets)
+                return merged, banksets
             except (ValueError, SyntaxError, FileNotFoundError) as e:
                 if attempt == 0:
                     # File may still be mid-write; wait and retry once.

@@ -167,7 +167,7 @@ class TestReloadCycle:
         )
         path = make_temp_config(content_a)
         from midi_event_remapper.loader import load_bankset_file
-        (old_bs,) = load_bankset_file(path)
+        (old_bs,) = load_bankset_file(path).banksets
         old_bs.active_bank = "drums"
 
         rl, gcfg = make_reloader([path], [old_bs])
@@ -199,7 +199,7 @@ class TestReloadCycle:
         )
         path = make_temp_config(content_two)
         from midi_event_remapper.loader import load_bankset_file
-        (old_bs,) = load_bankset_file(path)
+        (old_bs,) = load_bankset_file(path).banksets
         old_bs.active_bank = "drums"
 
         rl, gcfg = make_reloader([path], [old_bs])
@@ -301,7 +301,7 @@ class TestReloaderThread:
     def test_detects_file_change(self):
         path = make_temp_config(simple_config_text(cc_send="CC4"))
         from midi_event_remapper.loader import load_bankset_file
-        (bs,) = load_bankset_file(path)
+        (bs,) = load_bankset_file(path).banksets
 
         rl, gcfg = make_reloader([path], [bs], interval_s=0.05)
         gcfg.BANK_SETS = [bs]
@@ -343,7 +343,7 @@ class TestDisplayStyles:
         ])
         path = make_temp_config(content)
         from midi_event_remapper.loader import load_bankset_file
-        (bs,) = load_bankset_file(path)
+        (bs,) = load_bankset_file(path).banksets
         assert "_display" not in bs.banks["default"]
         assert bs._display_styles["default"]["bg"] == "#1a2e1a"
         path.unlink()
@@ -363,7 +363,7 @@ class TestDisplayStyles:
         ])
         path = make_temp_config(content)
         from midi_event_remapper.loader import load_bankset_file
-        (bs,) = load_bankset_file(path)
+        (bs,) = load_bankset_file(path).banksets
         calls = []
         bs._display_fn = lambda *args: calls.append(args)
         bs.switch_bank("drums")
@@ -384,7 +384,7 @@ class TestDisplayStyles:
         ])
         path = make_temp_config(content)
         from midi_event_remapper.loader import load_bankset_file
-        (bs,) = load_bankset_file(path)
+        (bs,) = load_bankset_file(path).banksets
         calls = []
         bs._display_fn = lambda *args: calls.append(args)
         bs.switch_bank("other")
@@ -415,7 +415,7 @@ class TestDisplayStyles:
         ])
         path = make_temp_config(content_before)
         from midi_event_remapper.loader import load_bankset_file
-        (bs,) = load_bankset_file(path)
+        (bs,) = load_bankset_file(path).banksets
 
         # Build a minimal display stub with current_bankset_name tracking.
         import types
@@ -468,7 +468,7 @@ class TestTransferStateNameMatch:
         path_new = make_temp_config(content_new)
 
         from midi_event_remapper.loader import load_bankset_file
-        (old_bs,) = load_bankset_file(path_old)
+        (old_bs,) = load_bankset_file(path_old).banksets
         old_bs.active_bank = "special"
 
         rl, gcfg = make_reloader([path_new], [old_bs], interval_s=0.05)
@@ -526,7 +526,7 @@ class TestRefreshDisplay:
         ])
         path = make_temp_config(combined)
         from midi_event_remapper.loader import load_bankset_file
-        banksets = load_bankset_file(path)   # [actition_bs, global_bs]
+        banksets = load_bankset_file(path).banksets   # [actition_bs, global_bs]
 
         # Display is currently showing "actition".
         display = self._make_display_stub(current_name="actition")
@@ -557,7 +557,7 @@ class TestRefreshDisplay:
         ])
         path = make_temp_config(combined)
         from midi_event_remapper.loader import load_bankset_file
-        banksets = load_bankset_file(path)
+        banksets = load_bankset_file(path).banksets
 
         # Display was showing something that no longer exists.
         display = self._make_display_stub(current_name="gone")

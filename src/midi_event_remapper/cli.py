@@ -92,14 +92,18 @@ def build_parser():
         "--debug",
         action  = "store_true",
         default = None,
-        help    = "Enable debug output (overrides config file setting).",
+        help    = (
+            "Enable both dispatcher-level ([in]/[dispatch]) and "
+            "per-BankSet internal debug output.  Overrides any "
+            '\"debug\" setting in the config file.'
+        ),
     )
 
     parser.add_argument(
         "--no-debug",
         action  = "store_false",
         dest    = "debug",
-        help    = "Disable debug output.",
+        help    = "Disable all debug output (overrides config file setting).",
     )
 
     parser.add_argument(
@@ -221,19 +225,23 @@ def main():
     # Build BankSet list
     # ------------------------------------------------------------------
     if args.configs:
-        banksets = []
+        banksets       = []
+        file_debug     = None   # last "debug" value seen in a settings block
         for path in args.configs:
             try:
-                loaded = load_bankset_file(path)
-                # load_bankset_file always returns a list; extend flattens it.
-                for item in loaded:
-                    if isinstance(item, list):
-                        banksets.extend(item)  # guard against accidental nesting
-                    else:
-                        banksets.append(item)
+                result = load_bankset_file(path)
             except (FileNotFoundError, ValueError) as e:
                 print(f"\n[cli] ERROR loading {path}:\n  {e}\n")
                 sys.exit(1)
+            # Global settings block: "debug" sets config.DEBUG (dispatcher
+            # level).  Collected here so the --debug CLI flag can override
+            # it below after all files are processed.
+            if "debug" in result.settings:
+                file_debug = result.settings["debug"]
+            banksets.extend(result.banksets)
+        # Apply file-level global debug before the CLI flag can override it.
+        if file_debug is not None:
+            global_config.DEBUG = file_debug
     else:
         banksets = list(global_config.BANK_SETS)
 
@@ -280,7 +288,9 @@ def main():
 
     # Override the global BANK_SETS used by the dispatcher.
     global_config.BANK_SETS = banksets
-    # Apply debug to global config too (affects dispatcher print calls).
+    # CLI --debug / --no-debug overrides both config.DEBUG (dispatcher level)
+    # and bs._debug (BankSet level).  File-level "debug" was applied above
+    # during loading; this line overrides that if the flag was given.
     if args.debug is not None:
         global_config.DEBUG = args.debug
 
@@ -321,7 +331,7 @@ def main():
             paths         = [p for p in args.configs],
             global_config = global_config,
             display       = display,
-            debug         = bool(args.debug),
+            debug         = args.debug is True,
         )
         reloader.start()
         print("[reload] Watching config files for changes.")

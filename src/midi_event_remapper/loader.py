@@ -80,10 +80,55 @@ fall back to the values in config.py:
                                         "CC0": [...],
                                     },
                                 }
+
+DEBUG LEVELS
+------------
+There are two independent debug flags:
+
+``config.DEBUG`` (global)
+    Controls dispatcher-level output: the ``[in]``, ``[dispatch]``, and
+    startup lines printed by ``dispatcher.py``.  Set globally via the
+    ``DEBUG`` constant in ``config.py`` or with the ``--debug`` CLI flag.
+
+``BankSet._debug`` (per-BankSet)
+    Controls BankSet-level detail: ``[BankSet:name] handle key=...``,
+    gesture timing, chord windows, sequence dispatch.  Set per-BankSet
+    via the ``"debug"`` key in a BankSet dict, or overridden for all
+    BankSets by the ``--debug`` CLI flag.
+
+The ``--debug`` CLI flag sets both levels simultaneously.  Setting
+``"debug": true`` in a BankSet dict sets only that BankSet's internal
+trace; the ``[in]`` / ``[dispatch]`` dispatcher lines will not appear
+unless ``config.DEBUG`` is also True.
+
+GLOBAL SETTINGS BLOCK
+---------------------
+In list-format config files, an optional settings block may appear as
+the first item.  A settings block is a dict with no ``"banks"`` key,
+distinguishing it from a BankSet dict.  Example::
+
+    [
+        {"debug": True},           # global settings block
+        {"name": "main", "banks": { ... }},
+    ]
+
+Recognised global settings keys:
+
+    "debug"     sets ``config.DEBUG`` (the dispatcher-level flag).
+                Hot-reloadable: changing it while the program runs takes
+                effect on the next event.
+
+The ``--debug`` / ``--no-debug`` CLI flags always override this setting.
+A single-dict config file (one BankSet) does not support a settings
+block; use list format for files that need global settings.
 """
 import ast
 import textwrap
+from collections import namedtuple
 from pathlib import Path
+
+# Return type of load_bankset_file.
+LoadResult = namedtuple("LoadResult", ["settings", "banksets"])
 
 from midi_event_remapper import config as global_config
 from midi_event_remapper.bankset import BankSet
@@ -154,12 +199,19 @@ def _make_bankset(data, default_name):
     )
 
 
-def load_bankset_file(path):
-    """
-    Load a BankSet config file and return a list of BankSet instances.
+_GLOBAL_SETTINGS_KEYS = frozenset({"debug"})
 
-    A file containing a single dict returns a one-element list.
-    A file containing a list of dicts returns one BankSet per dict.
+
+def load_bankset_file(path):
+    """Load a BankSet config file and return a ``LoadResult(settings, banksets)``.
+
+    ``settings`` is a dict of global settings extracted from an optional
+    settings block (see module docstring).  It is empty when no settings
+    block is present.  ``banksets`` is a list of BankSet instances.
+
+    A file containing a single dict returns one BankSet (no settings block).
+    A file containing a list of dicts returns one BankSet per dict; if the
+    first dict has no ``"banks"`` key it is treated as a settings block.
 
     Parameters
     ----------
@@ -167,7 +219,7 @@ def load_bankset_file(path):
 
     Returns
     -------
-    list[BankSet]
+    LoadResult
 
     Raises
     ------
@@ -187,17 +239,39 @@ def load_bankset_file(path):
         ) from e
 
     if isinstance(data, dict):
-        return [_make_bankset(data, path.stem)]
-    elif isinstance(data, list):
-        if not data:
-            raise ValueError(f"Config file {path} contains an empty list")
-        if not all(isinstance(d, dict) for d in data):
-            raise ValueError(
-                f"Config file {path}: must contain a dict or list of dicts"
-            )
-        return [_make_bankset(d, path.stem) for d in data]
-    else:
+        return LoadResult(settings={}, banksets=[_make_bankset(data, path.stem)])
+
+    if not isinstance(data, list):
         raise ValueError(
             f"Config file {path} must contain a dict or list of dicts, "
             f"got {type(data).__name__}"
         )
+    if not data:
+        raise ValueError(f"Config file {path} contains an empty list")
+    if not all(isinstance(d, dict) for d in data):
+        raise ValueError(
+            f"Config file {path}: list items must all be dicts"
+        )
+
+    # Detect optional settings block: first item with no "banks" key.
+    settings = {}
+    items = data
+    if "banks" not in data[0]:
+        settings_raw = data[0]
+        unknown = set(settings_raw) - _GLOBAL_SETTINGS_KEYS
+        if unknown:
+            raise ValueError(
+                f"Config file {path}: unknown global settings key(s): "
+                f"{sorted(unknown)}.  Recognised: {sorted(_GLOBAL_SETTINGS_KEYS)}."
+            )
+        settings = dict(settings_raw)
+        items = data[1:]
+        if not items:
+            raise ValueError(
+                f"Config file {path}: settings block present but no BankSets follow"
+            )
+
+    return LoadResult(
+        settings = settings,
+        banksets = [_make_bankset(d, path.stem) for d in items],
+    )
