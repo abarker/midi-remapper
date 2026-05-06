@@ -45,16 +45,15 @@ Command-line reference
 
 ::
 
-    midi-remapper [FILE ...] [OPTIONS]
+    midi-remapper FILE [FILE ...] [OPTIONS]
 
 **Positional arguments**
 
-``FILE``
+``FILE`` (required)
     One or more ``.py`` config files (see below).  Each file defines one
     or more BankSets.  Files are checked in order -- the first BankSet
-    that matches an incoming event handles it.  If no files are given,
-    the built-in ``config.py`` settings are used.  When files are given,
-    they are watched for changes and reloaded automatically (see
+    that matches an incoming event handles it.  Files are watched for
+    changes and reloaded automatically while the program runs (see
     `Live reloading`_).
 
 **Options**
@@ -84,7 +83,10 @@ Command-line reference
         midi-remapper mycontroller.py --bank actition:drums
 
 ``--debug`` / ``--no-debug``
-    Enable or disable debug output (overrides the file setting).
+    Enable or disable all debug output.  Sets both the dispatcher-level
+    flag (``[in]`` / ``[dispatch]`` lines) and the per-BankSet internal
+    trace simultaneously.  Overrides any ``"debug"`` setting in the
+    config file.  See `Debug output`_ for details.
 
 ``--long-press-ms MS``
     Override the long-press threshold for this session.
@@ -514,6 +516,29 @@ Key                 Effect
 ``height``          Window height in pixels
 ==================  ===========================================
 
+Debug output
+------------
+
+Two independent debug flags control what is printed:
+
+``config.DEBUG`` (dispatcher level)
+    Prints ``[in]`` (every incoming event), ``[dispatch]`` (which BankSet
+    handled it), and startup messages.  Set to ``True`` in ``config.py``,
+    use ``--debug`` on the command line, or add ``"debug": True`` to the
+    global settings block of a config file (this last option is
+    hot-reloadable).
+
+``BankSet._debug`` (BankSet level)
+    Prints ``[BankSet:name] handle key=...``, gesture timing, chord
+    windows, and sequence dispatch detail for that specific BankSet.
+    Set per-BankSet via ``"debug": True`` inside a BankSet dict.
+
+The ``--debug`` CLI flag sets both levels simultaneously and is the
+simplest way to get full output.  Setting ``"debug": True`` inside a
+BankSet dict gives internal trace for that BankSet only, without the
+dispatcher-level wrapper lines.  This is useful when you have multiple
+BankSets and want to trace only one without flooding the terminal.
+
 Live reloading
 --------------
 
@@ -543,6 +568,17 @@ still exists in the new config.  If you rename or remove the active bank,
 the BankSet resets to its ``active_bank`` setting (usually ``"default"``).
 
 Pass ``--no-reload`` to disable file watching entirely.
+
+The ``"debug"`` key in a global settings block is one of the things that
+can be toggled live::
+
+    [
+        {"debug": True},
+        {"name": "main", "banks": { ... }},
+    ]
+
+Changing ``"debug"`` from ``False`` to ``True`` and saving will enable
+dispatcher-level output immediately without restarting.
 
 JACK connection
 ---------------

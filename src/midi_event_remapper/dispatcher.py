@@ -104,7 +104,7 @@ def main_handler(event):
     is gated on the per-BankSet ``bs._debug`` flag and is independent.
     """
     if config.DEBUG:
-        print(f"[in] channel={event.channel} type={event.type} {event}")
+        print(f"\n[in] channel={event.channel} type={event.type} {event}")
 
     try:
         for bankset in config.BANK_SETS:

@@ -6,10 +6,8 @@ Entry point: midi-remapper (defined in pyproject.toml)
 
 Usage examples
 --------------
-Run with built-in config.py settings:
-    midi-remapper
-
-Run with one or more external config files (replaces built-in BankSets):
+Run with one or more config files:
+    midi-remapper actition.py
     midi-remapper actition.py drums.py
 
 Run with external files plus debug override:
@@ -57,11 +55,8 @@ def build_parser():
     parser.add_argument(
         "configs",
         metavar = "FILE",
-        nargs   = "*",
-        help    = (
-            "One or more .py config files, each describing one "
-            "BankSet.  If none are given, the built-in config.py is used."
-        ),
+        nargs   = "+",
+        help    = "One or more .py config files, each describing one BankSet.",
     )
 
     parser.add_argument(
@@ -242,8 +237,7 @@ def main():
         # Apply file-level global debug before the CLI flag can override it.
         if file_debug is not None:
             global_config.DEBUG = file_debug
-    else:
-        banksets = list(global_config.BANK_SETS)
+    # FILE is required (nargs='+'), so args.configs is always non-empty.
 
     bank_overrides = _parse_bank_overrides(args.bank)
     _apply_overrides(banksets, args, bank_overrides)
@@ -334,7 +328,8 @@ def main():
             debug         = args.debug is True,
         )
         reloader.start()
-        print("[reload] Watching config files for changes.")
+        if global_config.DEBUG:
+            print("[reload] Watching config files for changes.")
 
     try:
         dispatcher.run()
