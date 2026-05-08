@@ -34,6 +34,9 @@ Show the display window without an OS title bar:
 
 Disable live config reloading:
     midi-remapper actition.py --no-reload
+
+Use jack-rt backend for intra-block timestamp precision (SooperLooper):
+    midi-remapper actition.py --jack-rt
 """
 import argparse
 import sys
@@ -154,6 +157,21 @@ def build_parser():
         help    = (
             "Disable live config file reloading.  By default, config files "
             "are watched for changes and reloaded automatically."
+        ),
+    )
+
+    parser.add_argument(
+        "--jack-rt",
+        action  = "store_true",
+        dest    = "jack_rt",
+        help    = (
+            "Use the mididings jack-rt backend instead of the default jack "
+            "backend.  Runs the MIDI handler directly in the JACK process "
+            "callback, which preserves intra-block MIDI timestamps (useful "
+            "for SooperLooper loop-boundary precision).  WARNING: Python "
+            "code in the RT callback can cause xruns in other JACK clients. "
+            "Also calls sys.setswitchinterval(0.0005) to reduce GIL "
+            "contention."
         ),
     )
 
@@ -316,6 +334,23 @@ def main():
                 "standard library; install python3-tk on Debian/Ubuntu)."
             )
             display = None
+
+    # Apply jack-rt backend if requested.  setswitchinterval must be called
+    # before mididings starts, and the BACKEND must be set before dispatcher
+    # calls mididings_config().  A one-time startup warning is always printed
+    # (regardless of debug level) because the xrun risk affects other JACK
+    # clients, not just this program.
+    if args.jack_rt:
+        import sys as _sys
+        _sys.setswitchinterval(0.0005)
+        global_config.BACKEND = 'jack-rt'
+        print(
+            "[startup] jack-rt backend enabled.\n"
+            "  MIDI handler runs in the JACK RT callback.\n"
+            "  sys.setswitchinterval(0.0005) set to reduce GIL contention.\n"
+            "  WARNING: slow or blocking Python may cause xruns in all\n"
+            "  JACK clients.  Keep the handler lean.\n"
+        )
 
     # Start the live reloader when external config files are in use.
     reloader = None

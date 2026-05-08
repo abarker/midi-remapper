@@ -124,7 +124,7 @@ def main_handler(event):
 def run():
     """Validate config, check JACK, set up mididings, and start the loop."""
     if config.DEBUG:
-        print("\nStarting midi_event_remapper.\n")
+        print(f"\nStarting midi_event_remapper (backend: {config.BACKEND}).\n")
 
     # Check JACK before anything else.
     check_jack()

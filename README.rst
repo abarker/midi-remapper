@@ -104,6 +104,26 @@ Command-line reference
     passed on the command line are watched for changes and reloaded
     automatically while the program runs (see `Live reloading`_ below).
 
+``--jack-rt``
+    Use the mididings ``jack-rt`` backend instead of the default ``jack``
+    backend.  In ``jack-rt`` mode the MIDI handler runs directly inside
+    the JACK process callback, which preserves JACK MIDI intra-block
+    timestamps end-to-end.  This matters for applications like
+    SooperLooper that can exploit sub-buffer timestamp precision for
+    tighter loop-boundary alignment.
+
+    Also calls ``sys.setswitchinterval(0.0005)`` to reduce the chance
+    that the Python GIL is held by another thread when the JACK callback
+    fires.
+
+    **WARNING:** Python code in the JACK RT callback is not real-time
+    safe.  A slow or blocking handler (GUI update, file I/O, logging)
+    can cause xruns in *all* JACK clients, not just this program.  Keep
+    the event handler lean.  The mididings documentation recommends
+    against this mode when ``Process()`` is used with Python code, but
+    with a small JACK buffer (e.g. 512 samples) and a simple handler it
+    is often workable in practice.
+
 Config files
 ------------
 
