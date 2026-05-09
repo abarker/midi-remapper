@@ -107,10 +107,47 @@ Command-line reference
 ``--jack-rt``
     Use the mididings ``jack-rt`` backend instead of the default ``jack``
     backend.  In ``jack-rt`` mode the MIDI handler runs directly inside
-    the JACK process callback, which preserves JACK MIDI intra-block
-    timestamps end-to-end.  This matters for applications like
-    SooperLooper that can exploit sub-buffer timestamp precision for
-    tighter loop-boundary alignment.
+    the JACK process callback rather than in a separate thread.
+
+    **Latency benefit for synchronous events**
+
+    The ``jack`` buffered backend always adds one full JACK period of
+    latency because events are queued and processed in the *next* callback
+    cycle.  With ``jack-rt``, events that can be handled without waiting
+    (see below) are written to the JACK output buffer in the *same*
+    callback cycle -- one period (e.g. ~10.7 ms at 512 samples / 48 kHz)
+    earlier.
+
+    The following remapper features are **synchronous** and benefit from
+    this reduced latency:
+
+    - Direct mappings (``"CC0": [{"send": "CC4"}]``) -- both press and
+      release
+    - Toggle entries
+    - Gesture entries where **only** ``"single"`` is defined (no
+      ``"double"``, ``"triple"``, ``"long"``, or ``"repeat"``)
+    - Chord completions -- when all chord keys arrive within the window
+
+    The following features are **not synchronous** and fire via timer
+    callbacks regardless of backend, so they see no timing benefit:
+
+    - Any gesture entry that includes ``"double"``, ``"triple"``,
+      ``"long"``, or ``"repeat"`` (even the ``"single"`` branch of such
+      an entry waits for the multipress window)
+    - Chord fallback (when the chord does not complete in time)
+    - Chord multipress (``"double"`` / ``"triple"`` chord completions)
+    - Delayed sends (``"delay": ...``)
+
+    **SooperLooper timestamp precision**
+
+    ``jack-rt`` also preserves JACK MIDI intra-block timestamps
+    end-to-end.  A planned SooperLooper patch (``TriggerLatency =
+    buffersize - intra_block_offset``) would exploit these timestamps to
+    achieve exact loop-boundary alignment for synchronous events -- zero
+    net error regardless of where within the block the button was pressed.
+    This benefit requires both ``--jack-rt`` *and* the SooperLooper patch;
+    neither alone is sufficient.  Without the patch, ``--jack-rt`` does
+    not improve loop-boundary precision.
 
     Also calls ``sys.setswitchinterval(0.0005)`` to reduce the chance
     that the Python GIL is held by another thread when the JACK callback
@@ -118,11 +155,11 @@ Command-line reference
 
     **WARNING:** Python code in the JACK RT callback is not real-time
     safe.  A slow or blocking handler (GUI update, file I/O, logging)
-    can cause xruns in *all* JACK clients, not just this program.  Keep
-    the event handler lean.  The mididings documentation recommends
-    against this mode when ``Process()`` is used with Python code, but
-    with a small JACK buffer (e.g. 512 samples) and a simple handler it
-    is often workable in practice.
+    can cause xruns in *all* JACK clients, not just this program.  The
+    bank display window update path uses a lock-free deque (no mutex) to
+    minimise RT callback exposure.  With a lean handler and a reasonable
+    buffer size (e.g. 512 samples) this mode is often workable in
+    practice.  If no xruns are observed it is worth using.
 
 Config files
 ------------

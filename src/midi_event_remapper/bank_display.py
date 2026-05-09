@@ -7,6 +7,12 @@ player can glance at it to confirm which bank is active.
 The window runs in its own thread and is updated via a thread-safe queue.
 It stays on top of other windows so it remains visible while playing.
 
+The update queue uses ``collections.deque`` rather than ``queue.Queue``
+so that ``display.update()`` (called from within the mididings JACK RT
+callback when using ``--jack-rt``) does not acquire a threading.Lock.
+``deque.append`` is a single GIL-protected C operation with no additional
+mutex, removing the deadlock/block risk in the RT path.
+
 Usage
 -----
     from midi_event_remapper.bank_display import BankDisplay
@@ -20,8 +26,8 @@ Usage
     display.stop()
 """
 import os
-import queue
 import threading
+from collections import deque
 import tkinter as tk
 
 
@@ -52,7 +58,7 @@ class BankDisplay:
     """
 
     def __init__(self, no_titlebar=False):
-        self._queue        = queue.Queue()
+        self._deque        = deque()
         self._thread       = None
         self._root         = None
         self._running      = False
@@ -86,7 +92,7 @@ class BankDisplay:
     def stop(self):
         """Close the window and stop the background thread."""
         self._running = False
-        self._queue.put(None)  # Sentinel to unblock _poll.
+        self._deque.append(None)  # Sentinel picked up by next _poll cycle.
 
     def update(self, bankset_name, bank_name, style=None):
         """Notify the display of a bank change.  Safe to call from any thread.
@@ -108,7 +114,7 @@ class BankDisplay:
 
             Omitted keys fall back to the module-level defaults.
         """
-        self._queue.put((bankset_name, bank_name, style))
+        self._deque.append((bankset_name, bank_name, style))
 
     # ------------------------------------------------------------------
     # Tk thread
@@ -209,7 +215,7 @@ class BankDisplay:
     # ------------------------------------------------------------------
 
     def _poll(self):
-        """Process pending queue items and reschedule.
+        """Drain the deque of pending updates and reschedule.
 
         Also checks whether the main thread is still alive -- if it has
         exited (program finished or crashed), the window closes itself.
@@ -219,16 +225,13 @@ class BankDisplay:
             self._root.destroy()
             return
 
-        try:
-            while True:
-                item = self._queue.get_nowait()
-                if item is None:
-                    self._root.destroy()
-                    return
-                bankset_name, bank_name, style = item
-                self._apply_update(bankset_name, bank_name, style)
-        except queue.Empty:
-            pass
+        while self._deque:
+            item = self._deque.popleft()
+            if item is None:
+                self._root.destroy()
+                return
+            bankset_name, bank_name, style = item
+            self._apply_update(bankset_name, bank_name, style)
         if self._running:
             self._root.after(POLL_MS, self._poll)
 
