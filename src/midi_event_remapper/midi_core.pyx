@@ -70,14 +70,14 @@ cpdef object build_event(object item, int port, int channel,
     creation on every call.  The mididings event constructors are
     Python-level calls so the GIL is always held; the gain here is
     in the branching and arithmetic, not in GIL release.
+
+    Branch logic is identical to the pure Python version in midi.py so
+    both implementations are straightforward to compare and verify.
     """
     cdef int n, val, vel
-    cdef int first
+    cdef str send = item["send"]
 
-    send  = item["send"]
-    first = ord(send[0])
-
-    if first == 67:                          # 'C' -> CC
+    if send.startswith("CC"):
         if "value" in item:
             val = <int>item["value"]
         elif event_value is not None:
@@ -87,18 +87,18 @@ cpdef object build_event(object item, int port, int channel,
         n = int(send[2:])
         return CtrlEvent(port, channel, n, val)
 
-    if first == 80:                          # 'P' -> PC
+    if send.startswith("PC"):
         n = int(send[2:])
         return ProgramEvent(port, channel, n)
 
-    if first == 78:                          # 'N' -> NOTE
+    if send.startswith("NOTE"):
         n   = int(send[4:])
         vel = <int>item.get("velocity", 127)
         if item.get("note_off"):
             return NoteOffEvent(port, channel, n, vel)
         return NoteOnEvent(port, channel, n, vel)
 
-    if first == 83:                          # 'S' -> SYSEX
+    if send == "SYSEX":
         sx = item["sysex"]
         return SysExEvent(port, bytes(sx) if isinstance(sx, list) else sx)
 

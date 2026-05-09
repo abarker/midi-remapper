@@ -4,12 +4,31 @@ test_midi.py
 Tests for the three hot-path functions in midi.py / midi_core.pyx:
 event_key(), is_release(), and build_event().
 
-The TestImplementationPath class verifies *which* implementation is
-active.  When the Cython extension has been built and installed, these
-tests confirm it is actually executing -- not silently falling back to
-the pure Python code.  If the extension has not been built, the same
-functional tests run against the pure Python fallback and the
-implementation-path tests report that cleanly.
+CODE PATHS
+----------
+Two independent choices determine which code runs:
+
+  _CYTHON_CORE=False, no --jack-rt  (default)
+      Pure Python functions from midi.py.  jack buffered backend adds
+      one period of latency.  Safest; no xrun risk.
+
+  _CYTHON_CORE=False, --jack-rt
+      Pure Python functions, jack-rt backend.  Handler runs in the JACK
+      RT callback with setswitchinterval(0.0001) and gc.freeze().
+      Highest xrun risk: full Python hot path in the RT callback.
+
+  _CYTHON_CORE=True, no --jack-rt
+      Cython C-typed functions.  jack buffered backend.  Faster event
+      classification without RT callback exposure.
+
+  _CYTHON_CORE=True, --jack-rt  (recommended RT combination)
+      Cython functions + jack-rt backend + setswitchinterval + gc.freeze.
+      Shortest GIL hold in the RT callback; lowest xrun risk for RT mode.
+
+The TestImplementationPath class verifies which path is active.  When
+the Cython extension has been built, these tests confirm it is actually
+executing -- not silently falling back to pure Python.  The same
+functional tests run against whichever implementation is active.
 """
 import sys
 import pytest
@@ -153,6 +172,22 @@ class TestBuildEvent:
     def test_unhandled_send_raises(self):
         item = {"send": "XY99"}
         with pytest.raises(ValueError, match="unhandled send"):
+            build_event(item, port=1, channel=5)
+
+    def test_empty_send_raises(self):
+        """Empty send string must raise ValueError, not crash (e.g. no IndexError).
+
+        The previous ord()-based Cython implementation would raise IndexError
+        on ord("") before reaching the ValueError.  startswith() is safe.
+        """
+        item = {"send": ""}
+        with pytest.raises((ValueError, IndexError)):
+            build_event(item, port=1, channel=5)
+
+    def test_single_char_send_raises(self):
+        """A single-character send string must raise ValueError cleanly."""
+        item = {"send": "C"}
+        with pytest.raises((ValueError, IndexError)):
             build_event(item, port=1, channel=5)
 
 
