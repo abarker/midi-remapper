@@ -149,9 +149,11 @@ Command-line reference
     neither alone is sufficient.  Without the patch, ``--jack-rt`` does
     not improve loop-boundary precision.
 
-    Also calls ``sys.setswitchinterval(0.0005)`` to reduce the chance
+    Also calls ``sys.setswitchinterval(0.0001)`` to reduce the chance
     that the Python GIL is held by another thread when the JACK callback
-    fires.
+    fires, and runs ``gc.collect()`` + ``gc.freeze()`` after startup so
+    the cyclic garbage collector never scans startup objects.  Runtime
+    objects (created after startup completes) are still collected normally.
 
     **WARNING:** Python code in the JACK RT callback is not real-time
     safe.  A slow or blocking handler (GUI update, file I/O, logging)

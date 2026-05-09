@@ -170,7 +170,7 @@ def build_parser():
             "callback, which preserves intra-block MIDI timestamps (useful "
             "for SooperLooper loop-boundary precision).  WARNING: Python "
             "code in the RT callback can cause xruns in other JACK clients. "
-            "Also calls sys.setswitchinterval(0.0005) to reduce GIL "
+            "Also calls sys.setswitchinterval(0.0001) to reduce GIL "
             "contention."
         ),
     )
@@ -335,19 +335,20 @@ def main():
             )
             display = None
 
-    # Apply jack-rt backend if requested.  setswitchinterval must be called
-    # before mididings starts, and the BACKEND must be set before dispatcher
-    # calls mididings_config().  A one-time startup warning is always printed
-    # (regardless of debug level) because the xrun risk affects other JACK
-    # clients, not just this program.
+    # Apply jack-rt backend if requested.  setswitchinterval and BACKEND must
+    # be set before mididings starts its threads.  gc.collect()+gc.freeze()
+    # are applied later, just before dispatcher.run(), so all startup objects
+    # are included in the freeze.  A startup warning is always printed because
+    # the xrun risk affects other JACK clients, not just this program.
     if args.jack_rt:
         import sys as _sys
-        _sys.setswitchinterval(0.0005)
+        _sys.setswitchinterval(0.0001)
         global_config.BACKEND = 'jack-rt'
         print(
             "[startup] jack-rt backend enabled.\n"
             "  MIDI handler runs in the JACK RT callback.\n"
-            "  sys.setswitchinterval(0.0005) set to reduce GIL contention.\n"
+            "  sys.setswitchinterval(0.0001) set to reduce GIL contention.\n"
+            "  gc.collect() + gc.freeze() will run after startup completes.\n"
             "  WARNING: slow or blocking Python may cause xruns in all\n"
             "  JACK clients.  Keep the handler lean.\n"
         )
@@ -365,6 +366,22 @@ def main():
         reloader.start()
         if global_config.DEBUG:
             print("[reload] Watching config files for changes.")
+
+    # With jack-rt, freeze the GC permanent generation immediately before
+    # starting the event loop.  gc.collect() first clears any cycles from
+    # startup; gc.freeze() then moves all live objects into a generation
+    # the collector never scans again.  Objects created after this point
+    # (runtime state, reloaded BankSets) are still tracked and collected
+    # normally -- so genuine memory cycles at runtime are still cleaned up.
+    if args.jack_rt:
+        import gc as _gc
+        _gc.collect()
+        _gc.freeze()
+        if global_config.DEBUG:
+            counts = _gc.get_count()
+            frozen = _gc.get_freeze_count()
+            print(f"[startup] GC frozen: {frozen} objects in permanent "
+                  f"generation, runtime tracking still active.")
 
     try:
         dispatcher.run()
