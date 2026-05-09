@@ -666,6 +666,35 @@ Clone and install in editable mode::
     pip install -e ".[dev]"
     pytest
 
+Optional Cython extension
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+An optional Cython extension (``midi_event_remapper.midi_core``) provides
+faster inner-loop functions for the MIDI event hot path.  It replaces the
+pure-Python ``event_key()``, ``is_release()``, and ``build_event()``
+functions in ``midi.py`` with C-typed equivalents.  The pure-Python
+fallback is always available and used automatically if the extension is
+not built.
+
+The extension is most useful in combination with ``--jack-rt``.  When
+``--jack-rt`` is active, the startup message reports which implementation
+is running.
+
+To build::
+
+    pip install ".[rt]"                    # installs Cython
+    python setup.py build_ext --inplace    # compiles midi_core.pyx
+
+To verify::
+
+    python -c "from midi_event_remapper.midi import _CYTHON_CORE; print(_CYTHON_CORE)"
+
+This should print ``True`` if the extension was built and found.
+
+Phase 1 (current) uses C-typed local variables to reduce Python attribute
+lookup overhead on every event.  Phase 2 (future) will add ``nogil``
+sections for the scalar classification logic.
+
 License
 -------
 

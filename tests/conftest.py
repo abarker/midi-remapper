@@ -24,6 +24,7 @@ sys.modules.setdefault("mididings",        _mock)
 sys.modules.setdefault("mididings.event",  _mock)
 sys.modules.setdefault("mididings.engine", _mock.engine)
 
+
 # ---------------------------------------------------------------------------
 # FakeTimer: replaces threading.Timer so tests control when timers fire.
 # ---------------------------------------------------------------------------

@@ -6,11 +6,13 @@ conftest.py before any package imports occur, so midi.py's normal
 'from mididings import ...' calls receive these objects instead.
 """
 
-# Event type constants
-PROGRAM = "PROGRAM"
-CTRL    = "CTRL"
-NOTEON  = "NOTEON"
-NOTEOFF = "NOTEOFF"
+# Event type constants -- integer values, matching real mididings' bit-flag
+# convention.  Integer types are required for compatibility with the Cython
+# extension, which stores event.type as a C int (cdef int etype).
+NOTEON  = 1
+NOTEOFF = 2
+CTRL    = 4
+PROGRAM = 8
 
 
 class FakeOutputEvent:

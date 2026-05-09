@@ -344,11 +344,20 @@ def main():
         import sys as _sys
         _sys.setswitchinterval(0.0001)
         global_config.BACKEND = 'jack-rt'
+        from midi_event_remapper.midi import _CYTHON_CORE
+        _cython_note = (
+            "  Cython midi_core extension active -- hot path uses C types.\n"
+            if _CYTHON_CORE else
+            "  Cython midi_core extension NOT built (pure Python hot path).\n"
+            "  Build it for better RT performance:\n"
+            "    pip install \'.[rt]\' && python setup.py build_ext --inplace\n"
+        )
         print(
             "[startup] jack-rt backend enabled.\n"
             "  MIDI handler runs in the JACK RT callback.\n"
             "  sys.setswitchinterval(0.0001) set to reduce GIL contention.\n"
             "  gc.collect() + gc.freeze() will run after startup completes.\n"
+            + _cython_note +
             "  WARNING: slow or blocking Python may cause xruns in all\n"
             "  JACK clients.  Keep the handler lean.\n"
         )

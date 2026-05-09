@@ -5,22 +5,22 @@ Test helper factories shared between conftest.py and test modules.
 Lives in the main package so it is importable without sys.path tricks.
 Not imported by any production code.
 """
-from midi_event_remapper.mock_mididings import FakeInputEvent, NOTEOFF
+from midi_event_remapper.mock_mididings import FakeInputEvent, PROGRAM, CTRL, NOTEON, NOTEOFF
 from midi_event_remapper.bankset import BankSet
 
 
 def make_pc(program, port=1, channel=1):
-    return FakeInputEvent("PROGRAM", port=port, channel=channel,
+    return FakeInputEvent(PROGRAM, port=port, channel=channel,
                           program=program)
 
 
 def make_cc(ctrl, value=127, port=1, channel=1):
-    return FakeInputEvent("CTRL", port=port, channel=channel,
+    return FakeInputEvent(CTRL, port=port, channel=channel,
                           ctrl=ctrl, value=value)
 
 
 def make_note(note, velocity=127, port=1, channel=1):
-    return FakeInputEvent("NOTEON", port=port, channel=channel,
+    return FakeInputEvent(NOTEON, port=port, channel=channel,
                           note=note, velocity=velocity)
 
 
