@@ -6,45 +6,110 @@ These replace the pure-Python equivalents in midi.py when the
 extension has been built (``pip install ".[rt]"`` then
 ``python setup.py build_ext --inplace``).
 
-Phase 1 (this file): conservative annotation.  C-typed local
-variables eliminate repeated Python attribute lookup and dynamic
-dispatch overhead on the hot path.  All functions still hold the
-GIL because mididings event attributes and string construction
-are Python-level operations.
+Phase 1 added C-typed local variables to eliminate repeated Python
+attribute lookup and dynamic dispatch on the hot path.
 
-Phase 2 (future): cache the mididings integer constants as
-module-level C ints; restructure build_event() to minimise Python
-object creation; introduce ``nogil`` sections for the scalar
-classification logic.
+Phase 2 (this file) adds:
 
-Logic is identical to the pure-Python fallbacks in midi.py.
+- Module-level ``cdef int`` constants for the mididings event type
+  integers, making every event-type comparison a pure C integer
+  operation with no Python equality protocol or type dispatch.
+
+- ``cdef inline nogil`` helper functions containing the pure C
+  classification logic.  These are callable from any future ``nogil``
+  context without modification, and serve as the foundation for
+  Phase 3 (a C-struct event representation that eliminates Python
+  attribute access on the hot path entirely).
+
+- ``is_release()`` and ``event_key()`` each extract C int values from
+  the Python event object (GIL required), then delegate to the
+  ``nogil`` helpers for the pure logic.
+
+All functions are behaviourally identical to the pure-Python fallbacks
+in midi.py.  Logic is parallel so both implementations are easy to
+compare and verify.
 """
 
-from mididings import PROGRAM, CTRL, NOTEON, NOTEOFF
 from mididings.event import (
     ProgramEvent, CtrlEvent, NoteOnEvent, NoteOffEvent, SysExEvent,
 )
+from mididings import CTRL    as _CTRL_PY, \
+                      NOTEON  as _NOTEON_PY, \
+                      NOTEOFF as _NOTEOFF_PY, \
+                      PROGRAM as _PROGRAM_PY
 
+# ---------------------------------------------------------------------------
+# Module-level C integer constants.
+# Initialised once from the mididings Python constants at module load.
+# After this point every event-type comparison in this file is a pure
+# C integer operation: no Python object is consulted, no equality
+# protocol is invoked, no type dispatch occurs.
+# ---------------------------------------------------------------------------
+cdef int _CTRL    = _CTRL_PY
+cdef int _NOTEON  = _NOTEON_PY
+cdef int _NOTEOFF = _NOTEOFF_PY
+cdef int _PROGRAM = _PROGRAM_PY
+
+
+# ---------------------------------------------------------------------------
+# GIL-free classification helpers.
+# cdef inline nogil: inlined by the compiler, zero call overhead,
+# callable from any future nogil context.
+# ---------------------------------------------------------------------------
+
+cdef inline int _classify_etype(int etype) nogil:
+    """Map a raw mididings event type integer to a classification code.
+
+    Returns:
+        1  CC / control-change
+        2  NOTE (NoteOn or NoteOff -- same key; release handled separately)
+        3  PC / program-change
+        0  unknown / unhandled
+    """
+    if etype == _CTRL:
+        return 1
+    if etype == _NOTEON or etype == _NOTEOFF:
+        return 2
+    if etype == _PROGRAM:
+        return 3
+    return 0
+
+
+cdef inline bint _is_release_impl(int etype, int value) nogil:
+    """Return True if the pre-extracted fields indicate a release event.
+
+    Called by is_release() after extracting C int values from the Python
+    event object.  Pure C logic: no GIL required.
+    """
+    if etype == _CTRL:
+        return value == 0
+    return etype == _NOTEOFF
+
+
+# ---------------------------------------------------------------------------
+# Public API (cpdef: callable from Python and from Cython at C speed)
+# ---------------------------------------------------------------------------
 
 cpdef str event_key(object event):
     """Return the canonical string key for a mididings event.
 
     Returns ``'PC<n>'``, ``'CC<n>'``, ``'NOTE<n>'``, or ``None``.
 
-    Called on every incoming MIDI event -- the single hottest call site
-    in the entire package.  Storing ``event.type`` once as a C int
-    avoids three repeated Python attribute lookups in the common case.
+    Extracts ``event.type`` (GIL required -- Python attribute access),
+    passes it to ``_classify_etype()`` (nogil C classification), then
+    accesses the specific attribute and builds the string (GIL required).
     """
     cdef int etype = event.type
+    cdef int code  = _classify_etype(etype)
     cdef int n
 
-    if etype == CTRL:
+    if code == 1:
         n = event.ctrl
         return f"CC{n}"
-    if etype == PROGRAM:
+    if code == 3:
         n = event.program
         return f"PC{n}"
-    if etype == NOTEON or etype == NOTEOFF:
+    if code == 2:
         n = event.note
         return f"NOTE{n}"
     return None
@@ -53,26 +118,24 @@ cpdef str event_key(object event):
 cpdef bint is_release(object event):
     """Return True if event is a CC=0 or NoteOff release signal.
 
-    ``bint`` compiles to a C int (0/1), avoiding a Python bool object
-    on the return path.
+    Extracts the C int fields needed, then delegates to
+    ``_is_release_impl()`` (nogil) for the pure C logic.
+    ``bint`` compiles to a C int (0/1), avoiding a Python bool on return.
     """
     cdef int etype = event.type
-    if etype == CTRL:
-        return event.value == 0
-    return etype == NOTEOFF
+    cdef int value = 0
+    if etype == _CTRL:
+        value = event.value
+    return _is_release_impl(etype, value)
 
 
 cpdef object build_event(object item, int port, int channel,
                          object event_value=None):
     """Build a single mididings output event from a sequence item dict.
 
-    ``port`` and ``channel`` are C ints, avoiding Python int object
-    creation on every call.  The mididings event constructors are
-    Python-level calls so the GIL is always held; the gain here is
-    in the branching and arithmetic, not in GIL release.
-
-    Branch logic is identical to the pure Python version in midi.py so
-    both implementations are straightforward to compare and verify.
+    ``port`` and ``channel`` are C ints.  Branch logic uses
+    ``str.startswith()`` for readability and safety, identical to
+    the pure Python version in midi.py.
     """
     cdef int n, val, vel
     cdef str send = item["send"]

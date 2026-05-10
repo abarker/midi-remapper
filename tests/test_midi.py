@@ -280,3 +280,78 @@ class TestImplementationPath:
             impl = "pure Python (midi.py) -- extension not built"
         print(f"\n[midi impl] {impl}", file=sys.stderr)
         # This test always passes; its purpose is to make the path visible.
+
+class TestPhase2Architecture:
+    """Structural tests specific to Phase 2 of the Cython implementation.
+
+    These verify that:
+    - The internal ``cdef nogil`` helpers (_classify_etype, _is_release_impl)
+      are NOT accessible from Python (they are cdef, not cpdef or def).
+    - Classification is exhaustively correct for all recognised event types
+      and for values at the boundaries that distinguish press from release.
+    - Both implementations agree on every case (parametrized over both paths
+      via the MIDI_REMAPPER_NO_CYTHON environment variable in CI).
+    """
+
+    def test_internal_helpers_not_exposed(self):
+        """cdef functions must not be importable from Python.
+
+        _classify_etype and _is_release_impl are cdef inline nogil; they
+        are inlined by the compiler and have no Python-visible symbol.
+        Accidentally making them cpdef would expose implementation details
+        and add unnecessary Python call overhead.
+        """
+        if not _CYTHON_CORE:
+            pytest.skip("Cython extension not active")
+        import midi_event_remapper.midi_core as _core
+        assert not hasattr(_core, '_classify_etype'), (
+            "_classify_etype is exposed to Python -- should be cdef, not cpdef"
+        )
+        assert not hasattr(_core, '_is_release_impl'), (
+            "_is_release_impl is exposed to Python -- should be cdef, not cpdef"
+        )
+
+    def test_classification_exhaustive(self):
+        """event_key returns the correct key for every recognised event type."""
+        from midi_event_remapper.mock_mididings import FakeInputEvent, CTRL, NOTEON, NOTEOFF, PROGRAM
+
+        cases = [
+            (FakeInputEvent(CTRL,    port=1, channel=1, ctrl=0),    "CC0"),
+            (FakeInputEvent(CTRL,    port=1, channel=1, ctrl=64),   "CC64"),
+            (FakeInputEvent(CTRL,    port=1, channel=1, ctrl=127),  "CC127"),
+            (FakeInputEvent(NOTEON,  port=1, channel=1, note=0),    "NOTE0"),
+            (FakeInputEvent(NOTEON,  port=1, channel=1, note=60),   "NOTE60"),
+            (FakeInputEvent(NOTEON,  port=1, channel=1, note=127),  "NOTE127"),
+            (FakeInputEvent(NOTEOFF, port=1, channel=1, note=60),   "NOTE60"),
+            (FakeInputEvent(PROGRAM, port=1, channel=1, program=0), "PC0"),
+            (FakeInputEvent(PROGRAM, port=1, channel=1, program=127), "PC127"),
+        ]
+        for ev, expected in cases:
+            result = event_key(ev)
+            assert result == expected, (
+                f"event_key({ev.type}) returned {result!r}, expected {expected!r}"
+            )
+
+    def test_release_detection_exhaustive(self):
+        """is_release is correct for all cases that distinguish press/release."""
+        from midi_event_remapper.mock_mididings import FakeInputEvent, CTRL, NOTEON, NOTEOFF, PROGRAM
+
+        # CC=0 is release; any other CC value is press.
+        assert is_release(FakeInputEvent(CTRL, port=1, channel=1, ctrl=5, value=0))   is True
+        assert is_release(FakeInputEvent(CTRL, port=1, channel=1, ctrl=5, value=1))   is False
+        assert is_release(FakeInputEvent(CTRL, port=1, channel=1, ctrl=5, value=127)) is False
+        # NoteOff is always release regardless of velocity.
+        assert is_release(FakeInputEvent(NOTEOFF, port=1, channel=1, note=60)) is True
+        # NoteOn is never a release.
+        assert is_release(FakeInputEvent(NOTEON,  port=1, channel=1, note=60)) is False
+        # PC has no release concept.
+        assert is_release(FakeInputEvent(PROGRAM, port=1, channel=1, program=1)) is False
+        # Unknown type is not a release.
+        assert is_release(FakeInputEvent(0, port=1, channel=1)) is False
+
+    def test_unknown_event_type_returns_none(self):
+        """Any event type not in {CTRL, NOTEON, NOTEOFF, PROGRAM} gives None."""
+        from midi_event_remapper.mock_mididings import FakeInputEvent
+        for t in (0, 3, 5, 16, 255):
+            assert event_key(FakeInputEvent(t, port=1, channel=1)) is None
+
