@@ -24,6 +24,12 @@ sys.modules.setdefault("mididings",        _mock)
 sys.modules.setdefault("mididings.event",  _mock)
 sys.modules.setdefault("mididings.engine", _mock.engine)
 
+# If MIDI_REMAPPER_NO_CYTHON is set, block the Cython extension so that
+# tests run against the pure Python fallback even when the .so is present.
+import os as _os
+if _os.environ.get("MIDI_REMAPPER_NO_CYTHON"):
+    sys.modules.setdefault("midi_event_remapper.midi_core", None)
+
 
 # ---------------------------------------------------------------------------
 # FakeTimer: replaces threading.Timer so tests control when timers fire.

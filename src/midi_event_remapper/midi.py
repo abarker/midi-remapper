@@ -27,14 +27,16 @@ from mididings.event import (
 # Cython fast path -- transparently replace the three hot-path functions
 # when the compiled extension is available.
 # ---------------------------------------------------------------------------
+import os as _os
 _CYTHON_CORE = False
-try:
-    from midi_event_remapper.midi_core import (   # noqa: F811
-        event_key, is_release, build_event,
-    )
-    _CYTHON_CORE = True
-except ImportError:
-    pass
+if not _os.environ.get("MIDI_REMAPPER_NO_CYTHON"):
+    try:
+        from midi_event_remapper.midi_core import (   # noqa: F811
+            event_key, is_release, build_event,
+        )
+        _CYTHON_CORE = True
+    except ImportError:
+        pass
 
 
 if not _CYTHON_CORE:

@@ -689,7 +689,24 @@ To verify::
 
     python -c "from midi_event_remapper.midi import _CYTHON_CORE; print(_CYTHON_CORE)"
 
-This should print ``True`` if the extension was built and found.
+This prints ``True`` if the extension was built and is active.
+
+**Forcing the pure Python fallback**
+
+Once the extension is built it is used automatically.  To run without it
+-- for debugging, comparison, or to test the fallback path -- set the
+environment variable ``MIDI_REMAPPER_NO_CYTHON=1``::
+
+    MIDI_REMAPPER_NO_CYTHON=1 midi-remapper actition.py
+
+The same variable controls which path the test suite exercises::
+
+    pytest                              # tests whichever is installed
+    MIDI_REMAPPER_NO_CYTHON=1 pytest    # forces pure Python fallback
+
+Running both is the only way to confirm both implementations are correct.
+The flag must be an environment variable rather than a command-line switch
+because the choice is made at module import time, before argument parsing.
 
 Phase 1 (current) uses C-typed local variables to reduce Python attribute
 lookup overhead on every event.  Phase 2 (future) will add ``nogil``

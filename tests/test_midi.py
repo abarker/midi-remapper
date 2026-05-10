@@ -214,7 +214,19 @@ class TestImplementationPath:
             return False
 
     def test_cython_active_iff_extension_importable(self):
-        """_CYTHON_CORE must be True exactly when the .so can be imported."""
+        """_CYTHON_CORE must match the expected state for the current environment.
+
+        When MIDI_REMAPPER_NO_CYTHON is set, the extension is deliberately
+        suppressed regardless of whether the .so exists.  Otherwise _CYTHON_CORE
+        must be True exactly when the extension can be imported.
+        """
+        import os
+        if os.environ.get("MIDI_REMAPPER_NO_CYTHON"):
+            assert not _CYTHON_CORE, (
+                "MIDI_REMAPPER_NO_CYTHON is set but _CYTHON_CORE is True. "
+                "The environment variable is not being honoured."
+            )
+            return
         available = self._extension_importable()
         if available:
             assert _CYTHON_CORE, (
@@ -259,6 +271,12 @@ class TestImplementationPath:
 
     def test_report_active_implementation(self, capsys):
         """Print which implementation is under test (visible with -v or -s)."""
-        impl = "Cython (midi_core.so)" if _CYTHON_CORE else "pure Python (midi.py)"
+        import os
+        if _CYTHON_CORE:
+            impl = "Cython (midi_core.so)"
+        elif os.environ.get("MIDI_REMAPPER_NO_CYTHON"):
+            impl = "pure Python (midi.py) -- suppressed by MIDI_REMAPPER_NO_CYTHON"
+        else:
+            impl = "pure Python (midi.py) -- extension not built"
         print(f"\n[midi impl] {impl}", file=sys.stderr)
         # This test always passes; its purpose is to make the path visible.
