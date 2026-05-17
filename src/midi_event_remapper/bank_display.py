@@ -19,15 +19,14 @@ GIL-only C operation with no additional mutex.
 
 Exit behaviour
 --------------
-If the user clicks Exit (or closes the titled window) inside the display
-subprocess, the subprocess exits.  The relay thread detects the broken
-pipe and calls ``os._exit(0)`` to terminate the main process, preserving
-the previous behaviour where the Exit button killed the entire program.
+The display is **optional**.  Closing its window (or clicking Exit inside
+it) does *not* affect the main program -- the relay thread simply stops
+when it detects the subprocess has gone, and MIDI processing continues
+uninterrupted.
 
-If the main process calls ``display.stop()`` (normal shutdown), a sentinel
-is sent through the deque → pipe → subprocess, which causes the Tk window
-to destroy itself cleanly.  The relay thread exits normally without
-calling ``os._exit``.
+If the main process calls ``display.stop()`` (its normal ``finally``
+shutdown path), a sentinel is sent through the deque → pipe → subprocess,
+which causes the Tk window to destroy itself cleanly.
 
 Usage
 -----
@@ -42,7 +41,6 @@ Usage
     display.stop()
 """
 import json
-import os
 import subprocess
 import sys
 import threading
@@ -61,6 +59,9 @@ class BankDisplay:
     which is launched as ``sys.executable -m
     midi_event_remapper.bank_display_subprocess``.  Updates travel as
     newline-delimited JSON arrays over the subprocess stdin pipe.
+
+    The display is optional: if the user closes the window the relay
+    thread exits silently and the main program keeps running.
     """
 
     def __init__(self, no_titlebar=False):
@@ -112,9 +113,11 @@ class BankDisplay:
     def stop(self):
         """Signal the display to shut down cleanly.
 
-        Appends a sentinel ``None`` to the deque.  The relay thread picks
-        it up, closes the subprocess stdin (causing the subprocess to see
-        EOF and destroy its Tk window), then exits.
+        Appends a sentinel ``None`` to the deque.  If the relay thread is
+        still running it will pick it up, close the subprocess stdin
+        (causing the subprocess to see EOF and destroy its Tk window), and
+        exit.  If the subprocess has already gone (user closed the window),
+        the sentinel is a no-op.
         """
         self._running = False
         self._deque.append(None)  # sentinel
@@ -122,6 +125,9 @@ class BankDisplay:
     def update(self, bankset_name, bank_name, style=None):
         """Notify the display of a bank change.  Safe to call from any thread,
         including the JACK RT callback.
+
+        If the display subprocess has already exited (user closed it), the
+        message is silently discarded by the relay thread.
 
         Parameters
         ----------
@@ -147,6 +153,11 @@ class BankDisplay:
         underlying syscall, which is strictly better for RT safety than
         the previous arrangement where the Tk thread's GIL usage was
         concurrent with the RT callback.
+
+        Exits silently whenever the subprocess disappears (user closed the
+        window, subprocess crashed) or when the main process sends the
+        shutdown sentinel via ``stop()``.  Either way the main program is
+        not affected.
         """
         stdin = self._proc.stdin
         while True:
@@ -154,12 +165,17 @@ class BankDisplay:
                 item = self._deque.popleft()
 
                 if item is None:
-                    # Clean shutdown requested by the main process.
+                    # Shutdown sentinel from stop(): close the pipe so the
+                    # subprocess sees EOF and tears down its Tk window.
                     try:
                         stdin.close()
                     except OSError:
                         pass
-                    return  # relay exits normally; do NOT call os._exit
+                    try:
+                        self._proc.wait(timeout=2.0)
+                    except Exception:
+                        pass
+                    return
 
                 bankset_name, bank_name, style = item
 
@@ -172,12 +188,24 @@ class BankDisplay:
                     stdin.write(line)
                     stdin.flush()
                 except (BrokenPipeError, OSError):
-                    # Subprocess exited before we did (user clicked Exit or
-                    # closed the window).  Mirror the old behaviour: the
-                    # display's Exit button kills the entire program.
-                    os._exit(0)
+                    # Subprocess exited (user closed the window, or it
+                    # crashed).  The display is optional -- just stop the
+                    # relay and let the main program continue.
+                    try:
+                        self._proc.wait(timeout=1.0)
+                    except Exception:
+                        pass
+                    return
+
             else:
-                # No pending messages; sleep briefly to avoid busy-spinning.
-                # 5 ms is imperceptible for a visual display and uses
-                # negligible CPU.
+                # No pending messages.  Check whether the subprocess is
+                # still alive so we detect user-initiated close even when
+                # no bank changes are in flight -- without this, a
+                # BrokenPipeError would only surface on the next write,
+                # which might be arbitrarily far in the future.
+                if self._proc.poll() is not None:
+                    # Subprocess has already exited; nothing left to do.
+                    return
+                # Sleep briefly to avoid busy-spinning.  5 ms is
+                # imperceptible for a visual display and uses negligible CPU.
                 time.sleep(0.005)

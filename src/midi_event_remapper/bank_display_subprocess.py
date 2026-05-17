@@ -16,26 +16,22 @@ to module-level defaults.
 
 Shutdown protocol
 -----------------
-* **Clean shutdown** (main process called ``display.stop()``): the relay
-  thread in the parent closes the stdin pipe.  The stdin reader thread
-  here sees EOF, appends a ``None`` sentinel to the internal deque, and
-  the Tk poll callback destroys the window.  After ``mainloop()`` returns
-  the ``_stop_requested`` flag is set, so the process exits via
-  ``sys.exit(0)`` without signalling the parent.
+* **User closes window** (Exit menu item or title-bar X button): the Tk
+  window is destroyed, ``mainloop()`` returns, and the subprocess exits
+  normally.  The parent's relay thread detects the closed pipe (via
+  ``proc.poll()`` or a ``BrokenPipeError`` on the next write) and stops
+  silently.  The main MIDI program keeps running.
 
-* **User-initiated exit** (Exit menu item or window-close button): the
-  ``_stop_requested`` flag is *not* set, so after ``mainloop()`` returns
-  the process calls ``os._exit(0)``.  The parent's relay thread sees a
-  ``BrokenPipeError`` on the next write and calls ``os._exit(0)`` there
-  too, terminating the entire program -- identical to the previous
-  in-process behaviour where clicking Exit called ``os._exit(0)``
-  directly.
+* **Main process shuts down** (``display.stop()`` called in the
+  ``finally`` block of ``cli.py``): the relay thread closes the stdin
+  pipe, this subprocess sees EOF, appends a sentinel to its internal
+  deque, and the Tk poll callback destroys the window.  The subprocess
+  then exits normally.
 """
 from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import threading
 from collections import deque
@@ -68,9 +64,8 @@ class _BankDisplayWindow:
     """
 
     def __init__(self, no_titlebar: bool = False):
-        self._deque         = deque()
-        self._no_titlebar   = no_titlebar
-        self._stop_requested = False   # set True when stdin EOF arrives
+        self._deque       = deque()
+        self._no_titlebar = no_titlebar
 
         # Tk objects -- created in run(), referenced in callbacks.
         self._root          = None
@@ -91,9 +86,8 @@ class _BankDisplayWindow:
     def run(self):
         """Build the Tk window, start the stdin reader, run the mainloop.
 
-        Returns when the mainloop exits (window destroyed).  After
-        returning, the caller should check ``_stop_requested`` to decide
-        whether to call ``os._exit(0)``.
+        Returns when the mainloop exits for any reason (user closed the
+        window, or parent sent a clean-shutdown sentinel via EOF).
         """
         self._start_stdin_reader()
         self._run_tk()
@@ -113,9 +107,8 @@ class _BankDisplayWindow:
     def _stdin_reader(self):
         """Read JSON lines from stdin and enqueue them.
 
-        Runs until EOF (pipe closed by parent).  On EOF, sets
-        ``_stop_requested`` and appends a ``None`` sentinel so the Tk poll
-        loop can tear down the window cleanly.
+        Runs until EOF (pipe closed by parent) or an I/O error.  On exit,
+        appends a ``None`` sentinel so the Tk poll loop destroys the window.
         """
         try:
             for raw in sys.stdin:
@@ -128,11 +121,10 @@ class _BankDisplayWindow:
                     # Malformed line -- ignore rather than crash.
                     continue
                 self._deque.append(msg)
-        except (OSError, ValueError):
+        except Exception:
             pass
         finally:
-            # EOF or error: signal the Tk thread to shut down cleanly.
-            self._stop_requested = True
+            # EOF or error: signal the Tk thread to tear down the window.
             self._deque.append(None)
 
     # ------------------------------------------------------------------
@@ -235,14 +227,11 @@ class _BankDisplayWindow:
     # ------------------------------------------------------------------
 
     def _exit_program(self):
-        """Exit menu item: destroy window (mainloop returns, caller exits)."""
-        # _stop_requested is deliberately NOT set here, so the caller
-        # (run()) will call os._exit(0) after mainloop returns.
+        """Exit menu item: destroy the window and let the subprocess exit."""
         self._root.destroy()
 
     def _on_close(self):
         """WM_DELETE_WINDOW handler for titled mode."""
-        # Same as _exit_program: do not set _stop_requested.
         self._root.destroy()
 
     # ------------------------------------------------------------------
@@ -254,7 +243,7 @@ class _BankDisplayWindow:
         while self._deque:
             item = self._deque.popleft()
             if item is None:
-                # Sentinel from the stdin reader (EOF): clean shutdown.
+                # Sentinel: EOF from parent or stdin error.  Tear down.
                 self._root.destroy()
                 return
             bankset_name, bank_name, style = item
@@ -312,13 +301,7 @@ if __name__ == "__main__":
     args   = _parse_args()
     window = _BankDisplayWindow(no_titlebar=args.no_titlebar)
     window.run()
-
-    if not window._stop_requested:
-        # Mainloop exited because the user closed/exited the window, not
-        # because the parent sent a clean-shutdown sentinel.  Call
-        # os._exit(0) so the parent's relay thread gets BrokenPipeError
-        # on its next write, which causes it to call os._exit(0) there too
-        # -- terminating the entire program, matching previous behaviour.
-        os._exit(0)
-    # Otherwise (clean shutdown via sentinel): just fall off the end.
-    # sys.exit() would also be fine here but is unnecessary.
+    # Exit normally regardless of why the window closed.  The parent's
+    # relay thread will detect the closed pipe via proc.poll() or a
+    # BrokenPipeError on the next write, and will stop silently without
+    # affecting the main MIDI program.
