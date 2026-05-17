@@ -16,16 +16,69 @@ required.
 Installation
 ------------
 
-From PyPI::
+The package is not on PyPI.  Clone the repository first::
 
-    pip install midi-event-remapper
+    git clone https://github.com/abarker/midi-event-remapper.git
+    cd midi-event-remapper
 
-From GitHub::
+Then choose one of the four install options below.
 
-    pip install git+https://github.com/abarker/midi-event-remapper.git
+**Install options**
 
-Dependencies: ``mididings``, ``JACK-Client``, a running JACK server
-(via QjackCtl or ``jackd``).
+There are two axes: *regular* vs *editable* (developer) install, and
+*pure Python* vs *with the optional Cython RT extension*.
+
+Regular install
+    The package is copied into the active Python environment.  Source
+    changes are not reflected until you reinstall.
+
+Editable install (``--dev``)
+    The package is linked to the source tree so changes take effect
+    immediately.  Also installs pytest and other dev dependencies.
+
+Cython RT extension (``--cython``)
+    Builds ``midi_core``, which accelerates the MIDI event hot path.
+    Optional and off by default.  Worth trying only if you use
+    ``--jack-rt`` and still see occasional xruns.  Re-run the
+    install command after editing ``midi_core.pyx`` to recompile.
+
+**Using the install script (easier)**
+
+``bin/install.sh`` handles all four combinations.  Run it with no
+arguments for an interactive menu::
+
+    bash bin/install.sh
+
+Or pass flags for non-interactive use::
+
+    bash bin/install.sh                      # regular, pure Python
+    bash bin/install.sh --cython             # regular, with Cython
+    bash bin/install.sh --dev                # editable, pure Python
+    bash bin/install.sh --dev --cython       # editable, with Cython
+
+Add ``--no-tests`` to skip the post-install test run.
+
+**Manual pip commands**
+
+Regular install::
+
+    pip install .                            # pure Python
+    pip install ".[rt]"                     # with Cython extension
+
+Editable install::
+
+    pip install -e ".[dev]"                 # pure Python
+
+    pip install -e ".[dev,rt]"              # with Cython extension
+    python setup.py build_ext --inplace      # (also run this step)
+
+The ``[rt]`` extra installs Cython; ``[dev]`` adds pytest.  Re-run
+``python setup.py build_ext --inplace`` after editing ``midi_core.pyx``.
+
+**Dependencies**
+
+``mididings``, ``JACK-Client``, a running JACK server (via QjackCtl
+or ``jackd``).
 
 Quick start
 -----------
@@ -769,33 +822,43 @@ Clone and install in editable mode::
 Optional Cython extension
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-An optional Cython extension (``midi_event_remapper.midi_core``) provides
-faster inner-loop functions for the MIDI event hot path.  It replaces the
-pure-Python ``event_key()``, ``is_release()``, and ``build_event()``
+An optional Cython extension (``midi_event_remapper.midi_core``) replaces
+the pure-Python ``event_key()``, ``is_release()``, and ``build_event()``
 functions in ``midi.py`` with C-typed equivalents.  The pure-Python
-fallback is always available and used automatically if the extension is
-not built.
+fallback is always available and used automatically when the extension is
+not present.
 
-The extension is most useful in combination with ``--jack-rt``.  When
-``--jack-rt`` is active, the startup message reports which implementation
-is running.
+**Most users do not need this.**  The extension is worth trying only if
+you are using ``--jack-rt`` and still seeing occasional xruns after the
+other mitigations (``gc.freeze``, reduced switch interval, display
+subprocess) have been applied.  The improvement is modest.
 
-To build::
+When ``--jack-rt`` is active, the startup message reports which
+implementation is in use.
+
+To build, use the install script::
+
+    bash bin/install.sh --cython        # regular install
+    bash bin/install.sh --dev --cython  # editable install
+
+Or manually::
 
     pip install ".[rt]"                    # installs Cython
     python setup.py build_ext --inplace    # compiles midi_core.pyx
+
+Re-run either command after editing ``midi_core.pyx``.
 
 To verify::
 
     python -c "from midi_event_remapper.midi import _CYTHON_CORE; print(_CYTHON_CORE)"
 
-This prints ``True`` if the extension was built and is active.
+This prints ``True`` if the extension is active.
 
 **Forcing the pure Python fallback**
 
-Once the extension is built it is used automatically.  To run without it
--- for debugging, comparison, or to test the fallback path -- set the
-environment variable ``MIDI_REMAPPER_NO_CYTHON=1``::
+Once built the extension is used automatically.  To run without it
+-- for debugging or to test the fallback path -- set
+``MIDI_REMAPPER_NO_CYTHON=1``::
 
     MIDI_REMAPPER_NO_CYTHON=1 midi-remapper actition.py
 
