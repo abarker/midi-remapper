@@ -158,10 +158,13 @@ Command-line reference
     **WARNING:** Python code in the JACK RT callback is not real-time
     safe.  A slow or blocking handler (GUI update, file I/O, logging)
     can cause xruns in *all* JACK clients, not just this program.  The
-    bank display window update path uses a lock-free deque (no mutex) to
-    minimise RT callback exposure.  With a lean handler and a reasonable
-    buffer size (e.g. 512 samples) this mode is often workable in
-    practice.  If no xruns are observed it is worth using.
+    bank display window runs in a separate process with its own GIL, so
+    it cannot contend with the RT callback.  Updates from the RT callback
+    to the display are a bare ``deque.append()`` (no mutex, no cross-process
+    call), and a background relay thread forwards them to the display process
+    over a pipe.  With a lean handler and a reasonable buffer size (e.g. 512
+    samples) this mode is often workable in practice.  If no xruns are
+    observed it is worth using.
 
 Config files
 ------------

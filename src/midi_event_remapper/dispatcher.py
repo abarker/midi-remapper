@@ -154,8 +154,8 @@ def run():
 
     try:
         mididings_run(
-            Process(main_handler) >>
-            Output(port=config.PORT_INDEX, channel=config.CHANNEL)
+            Process(main_handler) # >>
+            #Output(port=config.PORT_INDEX, channel=config.CHANNEL)
         )
     except KeyboardInterrupt:
         pass  # clean Ctrl-C exit, message printed below
