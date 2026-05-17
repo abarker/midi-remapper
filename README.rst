@@ -315,6 +315,37 @@ define are active -- the rest are ignored::
         "repeat_ms":        100,
     },
 
+    # Accelerating repeat -- different sequence and/or interval per tier.
+    # Each tier activates when the key has been held for after_ms or more.
+    # Omit "repeat" in a tier to keep the current sequence and change
+    # only the interval; omit "repeat_ms" to keep the current interval.
+    "CC0": {
+        "single":          [{"send": "CC10", "value": 127}],
+        "repeat":          [{"send": "CC10", "value": 1}],
+        "repeat_delay_ms": 400,
+        "repeat_ms":       150,
+        "repeat_accel": [
+            # After 1.5s held: step by 2, same 150ms interval.
+            {"after_ms": 1500,
+             "repeat": [{"send": "CC10", "value": 2}]},
+            # After 3s held: step by 5, faster 80ms interval.
+            {"after_ms": 3000,
+             "repeat": [{"send": "CC10", "value": 5}],
+             "repeat_ms": 80},
+        ],
+    },
+
+    # Interval-only acceleration: same sequence but faster over time.
+    "CC0": {
+        "repeat":          [{"send": "CC10", "value": 1}],
+        "repeat_delay_ms": 400,
+        "repeat_ms":       200,
+        "repeat_accel": [
+            {"after_ms": 1500, "repeat_ms": 100},
+            {"after_ms": 3000, "repeat_ms":  50},
+        ],
+    },
+
 ``"long"`` and ``"repeat"`` both require a momentary input (CC or NOTE) --
 not valid for PC keys.  They are mutually exclusive.  Works with NOTE
 keys too::
@@ -572,6 +603,19 @@ These can be overridden per-file or on the command line:
 
 ``debounce_ms`` (default 60)
     Minimum time between toggle triggers.
+
+``repeat_delay_ms`` (default 500)
+    Hold time before the first repeat fires.
+    Override per-key with ``"repeat_delay_ms"`` in the entry dict.
+
+``repeat_ms`` (default 100)
+    Interval between subsequent repeat firings.
+    Override per-key with ``"repeat_ms"`` in the entry dict.
+
+``repeat_accel``
+    Optional list of acceleration tiers for ``"repeat"`` gestures.
+    Not a global constant -- specified per entry only.
+    See `Gesture mappings`_ for the full tier syntax.
 
 Bank display window
 -------------------

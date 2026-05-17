@@ -394,3 +394,124 @@ class TestJackTransportValidation:
         assert_clean({"default": {
             "PC5": [{"send": "JACK_TRANSPORT", "transport": "stop"}],
         }})
+
+
+class TestRepeatAccelValidation:
+
+    def test_valid_single_tier_repeat_only(self):
+        assert_clean({"default": {
+            "CC3": {
+                "repeat":    [{"send": "CC10", "value": 1}],
+                "repeat_ms": 150,
+                "repeat_accel": [
+                    {"after_ms": 2000, "repeat": [{"send": "CC10", "value": 5}]},
+                ],
+            },
+        }})
+
+    def test_valid_repeat_ms_only_tier(self):
+        assert_clean({"default": {
+            "CC3": {
+                "repeat":    [{"send": "CC10", "value": 1}],
+                "repeat_ms": 200,
+                "repeat_accel": [
+                    {"after_ms": 1000, "repeat_ms": 80},
+                ],
+            },
+        }})
+
+    def test_valid_both_keys_in_tier(self):
+        assert_clean({"default": {
+            "CC3": {
+                "repeat":    [{"send": "CC10", "value": 1}],
+                "repeat_ms": 200,
+                "repeat_accel": [
+                    {"after_ms": 1000,
+                     "repeat": [{"send": "CC10", "value": 3}],
+                     "repeat_ms": 80},
+                ],
+            },
+        }})
+
+    def test_valid_multiple_tiers(self):
+        assert_clean({"default": {
+            "CC3": {
+                "repeat":    [{"send": "CC10", "value": 1}],
+                "repeat_ms": 200,
+                "repeat_accel": [
+                    {"after_ms": 1000, "repeat": [{"send": "CC10", "value": 2}]},
+                    {"after_ms": 3000, "repeat": [{"send": "CC10", "value": 5}],
+                     "repeat_ms": 100},
+                ],
+            },
+        }})
+
+    def test_requires_repeat_at_top_level(self):
+        assert_error({"default": {
+            "CC3": {
+                "single":    [{"send": "CC10", "value": 1}],
+                "repeat_accel": [
+                    {"after_ms": 1000, "repeat": [{"send": "CC10", "value": 5}]},
+                ],
+            },
+        }}, "requires 'repeat' at the top level")
+
+    def test_must_be_a_list(self):
+        assert_error({"default": {
+            "CC3": {
+                "repeat":       [{"send": "CC10", "value": 1}],
+                "repeat_accel": "not-a-list",
+            },
+        }}, "must be a list")
+
+    def test_tier_missing_after_ms(self):
+        assert_error({"default": {
+            "CC3": {
+                "repeat":    [{"send": "CC10", "value": 1}],
+                "repeat_accel": [
+                    {"repeat": [{"send": "CC10", "value": 5}]},
+                ],
+            },
+        }}, "missing required 'after_ms'")
+
+    def test_tier_after_ms_not_positive(self):
+        assert_error({"default": {
+            "CC3": {
+                "repeat":    [{"send": "CC10", "value": 1}],
+                "repeat_accel": [
+                    {"after_ms": -1, "repeat": [{"send": "CC10", "value": 5}]},
+                ],
+            },
+        }}, "'after_ms' must be a positive number")
+
+    def test_tier_missing_both_repeat_and_repeat_ms(self):
+        assert_error({"default": {
+            "CC3": {
+                "repeat":    [{"send": "CC10", "value": 1}],
+                "repeat_accel": [
+                    {"after_ms": 1000},
+                ],
+            },
+        }}, "at least one of 'repeat' or 'repeat_ms'")
+
+    def test_tier_repeat_ms_not_positive(self):
+        assert_error({"default": {
+            "CC3": {
+                "repeat":    [{"send": "CC10", "value": 1}],
+                "repeat_accel": [
+                    {"after_ms": 1000, "repeat_ms": 0},
+                ],
+            },
+        }}, "'repeat_ms' must be a positive number")
+
+    def test_tier_repeat_sequence_validated(self):
+        """Sequences inside tiers go through the same check_sequence logic."""
+        assert_error({"default": {
+            "CC3": {
+                "repeat":    [{"send": "CC10", "value": 1}],
+                "repeat_accel": [
+                    {"after_ms": 1000,
+                     "repeat": [{"send": "CC999_BAD"}]},
+                ],
+            },
+        }}, "CC999_BAD")

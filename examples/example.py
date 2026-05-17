@@ -230,6 +230,37 @@
             #     "repeat_ms":        80,    # ms between subsequent repeats
             # },
 
+            # Accelerating repeat -- repeat_accel adds per-tier overrides.
+            # Each tier activates when held for after_ms or longer.
+            # "repeat" in a tier changes the sequence; "repeat_ms" changes
+            # the interval.  Either or both may be omitted per tier.
+            # "CC3": {
+            #     "single":          [{"send": "CC30", "value": 127}],
+            #     "repeat":          [{"send": "CC30", "value": 1}],
+            #     "repeat_delay_ms": 400,
+            #     "repeat_ms":       150,
+            #     "repeat_accel": [
+            #         # After 1.5s: step by 2, same 150ms interval.
+            #         {"after_ms": 1500,
+            #          "repeat": [{"send": "CC30", "value": 2}]},
+            #         # After 3s: step by 5, faster 80ms interval.
+            #         {"after_ms": 3000,
+            #          "repeat": [{"send": "CC30", "value": 5}],
+            #          "repeat_ms": 80},
+            #     ],
+            # },
+
+            # Interval-only acceleration (same action, faster rate over time).
+            # "CC3": {
+            #     "repeat":          [{"send": "CC30", "value": 1}],
+            #     "repeat_delay_ms": 400,
+            #     "repeat_ms":       200,
+            #     "repeat_accel": [
+            #         {"after_ms": 1500, "repeat_ms": 100},
+            #         {"after_ms": 3000, "repeat_ms":  50},
+            #     ],
+            # },
+
             # Repeat-only (no single action on quick tap).
             # "CC3": {
             #     "repeat":          [{"send": "CC30", "value": 127}],

@@ -104,7 +104,8 @@ class BankSet:
 
     # Config dict keys that are metadata, not action labels.
     _META_KEYS    = frozenset({"long_ms", "trigger_value", "debounce_ms",
-                               "repeat_delay_ms", "repeat_ms", "multi_ms"})
+                               "repeat_delay_ms", "repeat_ms", "multi_ms",
+                               "repeat_accel"})
     # Bank-level keys that are not MIDI event mappings and are skipped during
     # lookup table construction and validation.  "_display" is normally
     # stripped by the loader before the BankSet is constructed; this acts as
@@ -511,6 +512,59 @@ class BankSet:
                 for label in ("single", "double", "triple", "long", "repeat"):
                     if label in value:
                         check_sequence(value[label], f"{ctx}[{label!r}]")
+                # repeat_accel tiers: each may override the repeat
+                # sequence, the repeat interval, or both.
+                accel = value.get("repeat_accel")
+                if accel is not None:
+                    if "repeat" not in value:
+                        errors.append(
+                            f"{ctx}: 'repeat_accel' requires 'repeat' "
+                            f"at the top level"
+                        )
+                    if not isinstance(accel, list):
+                        errors.append(
+                            f"{ctx}: 'repeat_accel' must be a list"
+                        )
+                    else:
+                        for j, tier in enumerate(accel):
+                            tctx = f"{ctx} repeat_accel[{j}]"
+                            if not isinstance(tier, dict):
+                                errors.append(
+                                    f"{tctx}: must be a dict"
+                                )
+                                continue
+                            if "after_ms" not in tier:
+                                errors.append(
+                                    f"{tctx}: missing required 'after_ms'"
+                                )
+                            else:
+                                after = tier["after_ms"]
+                                if not isinstance(after, (int, float)) \
+                                        or after <= 0:
+                                    errors.append(
+                                        f"{tctx}: 'after_ms' must be a "
+                                        f"positive number"
+                                    )
+                            has_repeat_key = "repeat"    in tier
+                            has_repeat_ms  = "repeat_ms" in tier
+                            if not has_repeat_key and not has_repeat_ms:
+                                errors.append(
+                                    f"{tctx}: must specify at least one "
+                                    f"of 'repeat' or 'repeat_ms'"
+                                )
+                            if has_repeat_key:
+                                check_sequence(
+                                    tier["repeat"],
+                                    f"{tctx}['repeat']"
+                                )
+                            if has_repeat_ms:
+                                ms = tier["repeat_ms"]
+                                if not isinstance(ms, (int, float)) \
+                                        or ms <= 0:
+                                    errors.append(
+                                        f"{tctx}: 'repeat_ms' must be "
+                                        f"a positive number"
+                                    )
             elif etype == "chord":
                 if "long" in value:
                     errors.append(
@@ -871,13 +925,16 @@ class BankSet:
         self._gesture_long_timers[key] = t
         self._timer_list.append(t)
 
-    def _start_repeat_timer(self, key, entry, event, initial=False):
+    def _start_repeat_timer(self, key, entry, event, initial=False,
+                             repeat_ms_override=None):
         """
         Schedule the next repeat fire for key.
 
         On the initial call (initial=True) the delay is repeat_delay_ms
         (hold time before first repeat fires).  On subsequent calls the
-        delay is repeat_ms (interval between repeats).
+        delay is repeat_ms (interval between repeats), unless
+        repeat_ms_override is provided (used by the accel tier logic to
+        apply the active tier's repeat_ms immediately).
 
         Each firing reschedules itself, so repeating continues until
         _cancel_repeat() is called on release.
@@ -888,7 +945,11 @@ class BankSet:
 
         delay_ms = (
             entry.get("repeat_delay_ms", self._repeat_delay_ms) if initial
-            else entry.get("repeat_ms",  self._repeat_ms)
+            else (
+                repeat_ms_override
+                if repeat_ms_override is not None
+                else entry.get("repeat_ms", self._repeat_ms)
+            )
         )
 
         def fire_repeat(key_=key, entry_=entry, ev_=event):
@@ -899,11 +960,38 @@ class BankSet:
             if key_ not in self._gesture_press_time:
                 return
             self._gesture_repeat_fired.add(key_)
+
+            # ── Accel tier selection ──────────────────────────────────
+            # Walk the sorted tiers and take the last one whose
+            # after_ms threshold has been reached.  Tiers may override
+            # the sequence, the next interval, or both; omitted keys
+            # fall through to the lower tier or the base entry value.
+            elapsed_ms = (
+                time.time() - self._gesture_press_time[key_]
+            ) * 1000
+            accel = entry_.get("repeat_accel", [])
+            active_seq = entry_["repeat"]
+            next_ms    = None   # None → use entry_ / bankset default
+            for tier in sorted(accel, key=lambda t: t["after_ms"]):
+                if elapsed_ms >= tier["after_ms"]:
+                    if "repeat" in tier:
+                        active_seq = tier["repeat"]
+                    if "repeat_ms" in tier:
+                        next_ms = tier["repeat_ms"]
+                else:
+                    break   # tiers are ascending; none beyond this match
+
             if self._debug:
-                print(f"[gesture:{self.name}] key={key_} -> repeat")
-            self._fire_sequence(entry_["repeat"], ev_)
-            # Reschedule for the next repeat interval.
-            self._start_repeat_timer(key_, entry_, ev_, initial=False)
+                tier_note = (
+                    f", elapsed={elapsed_ms:.0f}ms" if accel else ""
+                )
+                print(
+                    f"[gesture:{self.name}] key={key_} -> repeat{tier_note}"
+                )
+            self._fire_sequence(active_seq, ev_)
+            # Reschedule using the active tier's interval (if any).
+            self._start_repeat_timer(key_, entry_, ev_, initial=False,
+                                     repeat_ms_override=next_ms)
 
         t = threading.Timer(delay_ms / 1000.0, fire_repeat)
         t.daemon = True

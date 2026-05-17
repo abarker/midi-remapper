@@ -1198,3 +1198,204 @@ class TestJackTransportSend:
         fake_timer.active()[0].fire()   # long timer fires
         time.sleep(0.05)
         assert ("locate", 0) in mock_jack_ctrl.calls
+
+
+# ---------------------------------------------------------------------------
+# repeat_accel: accelerating repeat
+# ---------------------------------------------------------------------------
+
+class TestRepeatAccel:
+    """Tests for repeat_accel: per-tier sequence and/or interval overrides."""
+
+    # Standard three-tier config used by most tests.
+    _CFG = {
+        "default": {
+            "CC3": {
+                "repeat":          [{"send": "CC10", "value": 1}],
+                "repeat_delay_ms": 400,
+                "repeat_ms":       150,
+                "repeat_accel": [
+                    {"after_ms": 2000,
+                     "repeat": [{"send": "CC10", "value": 2}]},
+                    {"after_ms": 4000,
+                     "repeat": [{"send": "CC10", "value": 5}],
+                     "repeat_ms": 100},
+                ],
+            },
+        },
+    }
+
+    def _press(self, bs, elapsed_s=0.0):
+        """Press CC3 and backdate press_time to simulate elapsed hold."""
+        bs.handle(make_cc(3, value=127))
+        bs._gesture_press_time["CC3"] = time.time() - elapsed_s
+
+    def test_base_seq_before_any_tier(self, fake_timer):
+        """Before any tier threshold: base repeat sequence fires."""
+        bs, out = make_bankset(self._CFG)
+        self._press(bs, elapsed_s=0.5)   # 500ms < 2000ms
+        fake_timer.active()[0].fire()
+        assert len(out) == 1
+        assert out[0].value == 1
+
+    def test_tier1_seq_after_first_threshold(self, fake_timer):
+        """After first tier's after_ms: tier 1 sequence fires."""
+        bs, out = make_bankset(self._CFG)
+        self._press(bs, elapsed_s=2.1)   # 2100ms >= 2000ms
+        fake_timer.active()[0].fire()
+        assert len(out) == 1
+        assert out[0].value == 2
+
+    def test_tier2_seq_after_second_threshold(self, fake_timer):
+        """After second tier's after_ms: tier 2 sequence fires."""
+        bs, out = make_bankset(self._CFG)
+        self._press(bs, elapsed_s=4.1)   # 4100ms >= 4000ms
+        fake_timer.active()[0].fire()
+        assert len(out) == 1
+        assert out[0].value == 5
+
+    def test_tier_fires_exactly_at_threshold(self, fake_timer):
+        """Tier activates when elapsed_ms equals after_ms exactly."""
+        bs, out = make_bankset(self._CFG)
+        self._press(bs, elapsed_s=2.0)   # exactly 2000ms
+        fake_timer.active()[0].fire()
+        assert out[0].value == 2
+
+    def test_escalation_across_consecutive_fires(self, fake_timer):
+        """Sequence escalates correctly across three consecutive fires."""
+        bs, out = make_bankset(self._CFG)
+        bs.handle(make_cc(3, value=127))
+
+        bs._gesture_press_time["CC3"] = time.time() - 0.5
+        fake_timer.active()[0].fire()   # base tier
+
+        bs._gesture_press_time["CC3"] = time.time() - 2.1
+        fake_timer.active()[0].fire()   # tier 1
+
+        bs._gesture_press_time["CC3"] = time.time() - 4.1
+        fake_timer.active()[0].fire()   # tier 2
+
+        assert [e.value for e in out] == [1, 2, 5]
+
+    def test_tier_repeat_ms_only_keeps_base_seq(self, fake_timer):
+        """A tier with only repeat_ms inherits the base repeat sequence."""
+        bs, out = make_bankset({"default": {
+            "CC3": {
+                "repeat":    [{"send": "CC10", "value": 1}],
+                "repeat_ms": 200,
+                "repeat_accel": [
+                    {"after_ms": 1000, "repeat_ms": 50},
+                ],
+            },
+        }})
+        self._press(bs, elapsed_s=1.5)
+        fake_timer.active()[0].fire()
+        assert out[0].value == 1    # base sequence still fires
+
+    def test_tier_repeat_ms_schedules_faster_next_timer(self, fake_timer):
+        """A tier's repeat_ms is used for the next timer interval."""
+        bs, out = make_bankset({"default": {
+            "CC3": {
+                "repeat":    [{"send": "CC10", "value": 1}],
+                "repeat_ms": 200,
+                "repeat_accel": [
+                    {"after_ms": 1000, "repeat_ms": 50},
+                ],
+            },
+        }})
+        self._press(bs, elapsed_s=1.5)
+        fake_timer.active()[0].fire()
+        next_t = bs._gesture_repeat_timers.get("CC3")
+        assert next_t is not None
+        assert abs(next_t.delay - 0.05) < 0.001
+
+    def test_no_tier_active_uses_base_repeat_ms(self, fake_timer):
+        """Before any tier threshold the rescheduled timer uses base repeat_ms."""
+        bs, out = make_bankset(self._CFG)
+        self._press(bs, elapsed_s=0.5)
+        fake_timer.active()[0].fire()
+        next_t = bs._gesture_repeat_timers.get("CC3")
+        assert next_t is not None
+        assert abs(next_t.delay - 0.15) < 0.001   # 150ms base
+
+    def test_tier2_repeat_ms_overrides_base(self, fake_timer):
+        """Tier 2 (after 4s) carries its own repeat_ms=100ms."""
+        bs, out = make_bankset(self._CFG)
+        self._press(bs, elapsed_s=4.1)
+        fake_timer.active()[0].fire()
+        next_t = bs._gesture_repeat_timers.get("CC3")
+        assert next_t is not None
+        assert abs(next_t.delay - 0.10) < 0.001   # 100ms tier override
+
+    def test_release_cancels_during_accel(self, fake_timer):
+        """Release cancels pending repeat correctly while in an accel tier."""
+        bs, out = make_bankset(self._CFG)
+        self._press(bs, elapsed_s=2.1)
+        fake_timer.active()[0].fire()            # one tier-1 repeat fires
+        bs.handle(make_cc(3, value=0))           # release
+        assert "CC3" not in bs._gesture_repeat_timers
+        assert len(out) == 1
+
+    def test_single_tap_unaffected_by_accel(self, fake_timer):
+        """Quick release before first repeat fires: single action fires."""
+        bs, out = make_bankset({"default": {
+            "CC3": {
+                "single":          [{"send": "CC20", "value": 127}],
+                "repeat":          [{"send": "CC10", "value": 1}],
+                "repeat_delay_ms": 500,
+                "repeat_ms":       150,
+                "repeat_accel": [
+                    {"after_ms": 2000,
+                     "repeat": [{"send": "CC10", "value": 5}]},
+                ],
+            },
+        }})
+        bs.handle(make_cc(3, value=127))
+        result = bs.handle(make_cc(3, value=0))   # quick release
+        assert result is not None
+        assert len(result) == 1
+        assert result[0].ctrl == 20
+
+    def test_accel_tier_seq_supports_delay_key(self, fake_timer):
+        """Sequences in accel tiers honour the 'delay' key normally."""
+        bs, out = make_bankset({"default": {
+            "CC3": {
+                "repeat":    [{"send": "CC10", "value": 1}],
+                "repeat_ms": 150,
+                "repeat_accel": [
+                    {"after_ms": 1000,
+                     "repeat": [{"send": "CC10", "value": 5, "delay": 0.05}]},
+                ],
+            },
+        }})
+        self._press(bs, elapsed_s=1.5)
+        t0 = fake_timer.active()[0]
+        t0.fire()                           # fires tier seq (delayed item)
+
+        # Immediate output is empty; a delay timer + the repeat reschedule
+        # are now pending.
+        assert len(out) == 0
+        t_repeat = bs._gesture_repeat_timers.get("CC3")
+        delay_t = next(
+            t for t in fake_timer.active()
+            if not getattr(t, "_fired", False) and t is not t_repeat
+        )
+        delay_t.fire()
+        assert len(out) == 1
+        assert out[0].value == 5
+
+    def test_unsorted_tiers_still_work(self, fake_timer):
+        """Tiers defined out of after_ms order are sorted automatically."""
+        bs, out = make_bankset({"default": {
+            "CC3": {
+                "repeat":    [{"send": "CC10", "value": 1}],
+                "repeat_ms": 150,
+                "repeat_accel": [
+                    {"after_ms": 4000, "repeat": [{"send": "CC10", "value": 5}]},
+                    {"after_ms": 2000, "repeat": [{"send": "CC10", "value": 2}]},
+                ],
+            },
+        }})
+        self._press(bs, elapsed_s=2.5)   # between 2000 and 4000
+        fake_timer.active()[0].fire()
+        assert out[0].value == 2         # tier1, not tier2
