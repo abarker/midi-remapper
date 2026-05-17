@@ -860,7 +860,7 @@ Once built the extension is used automatically.  To run without it
 -- for debugging or to test the fallback path -- set
 ``MIDI_REMAPPER_NO_CYTHON=1``::
 
-    MIDI_REMAPPER_NO_CYTHON=1 midi-remapper actition.py
+    MIDI_REMAPPER_NO_CYTHON=1 midi-remapper myconfig.py
 
 The same variable controls which path the test suite exercises::
 
