@@ -402,10 +402,58 @@ environment variables all work.  Some useful examples::
 
     jack_transport start
     jack_transport stop
-    jack_transport locate 0
+    jack_transport locate 0   # prefer JACK_TRANSPORT for this -- see below
     aconnect 14:0 128:0
     echo 120 > /tmp/bpm.txt
     notify-send "Bank: drums"
+
+JACK transport control
+----------------------
+
+Use ``JACK_TRANSPORT`` to control JACK transport (play, stop, locate)
+without spawning a subprocess.  A persistent JACK client
+(``midi_remapper_ctrl``) is opened once when a ``JACK_TRANSPORT`` action
+is detected in a config file during loading; all subsequent actions reuse
+the same connection.  Because no ``fork``/``exec`` occurs and no new JACK
+client is registered at action time, recording clients are not disturbed.
+Prefer this over ``CMD`` with ``jack_transport`` when other clients are
+recording::
+
+    # Rewind to the start of the timeline.
+    "CC6": [{"send": "JACK_TRANSPORT", "transport": "locate 0"}],
+
+    # Start and stop rolling.
+    "CC7": [{"send": "JACK_TRANSPORT", "transport": "start"}],
+    "CC8": [{"send": "JACK_TRANSPORT", "transport": "stop"}],
+
+    # Stop and rewind on a gesture.
+    "CC6": {
+        "single": [{"send": "JACK_TRANSPORT", "transport": "stop"}],
+        "long":   [{"send": "JACK_TRANSPORT", "transport": "locate 0"}],
+    },
+
+    # Combined with a MIDI output in the same sequence.
+    "CC6": [
+        {"send": "CC60", "value": 127},
+        {"send": "JACK_TRANSPORT", "transport": "locate 0"},
+    ],
+
+Valid ``"transport"`` values:
+
+``"locate <frame>"``
+    Reposition to *frame* samples from time zero.  ``0`` rewinds to the
+    beginning.  At 48 kHz, frame 48000 = 1 second.
+
+``"start"``
+    Begin rolling.
+
+``"stop"``
+    Stop rolling.
+
+The ``"delay"`` key is supported, same as for ``CMD``.
+
+The ``midi_remapper_ctrl`` client is portless and appears as a passive
+entry in the JACK client list.  No port connections are needed.
 
 Latency summary
 ---------------
@@ -470,6 +518,11 @@ Each output in a sequence is a dict with the following keys:
 
 ``"cmd"``
     Shell command string.  Required when ``"send"`` is ``"CMD"``.
+
+``"transport"``
+    JACK transport command string.  Required when ``"send"`` is
+    ``"JACK_TRANSPORT"``.  Valid values: ``"locate <frame>"``,
+    ``"start"``, ``"stop"``.
 
 .. note::
 

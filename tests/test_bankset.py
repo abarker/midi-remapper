@@ -1081,3 +1081,120 @@ class TestCancelTimersActive:
 
         # Fallback dispatch of CC1 must not have happened.
         assert captured == []
+
+
+# ---------------------------------------------------------------------------
+# JACK_TRANSPORT send
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def mock_jack_ctrl(monkeypatch):
+    """Provide a mock jack_ctrl module so JACK_TRANSPORT tests run without JACK.
+
+    The fixture patches sys.modules so that the lazy import inside
+    BankSet._run_jack_transport (``from midi_event_remapper import jack_ctrl``)
+    receives the mock rather than trying to open a real JACK connection.
+    """
+    import sys, types
+    calls = []
+    mock = types.SimpleNamespace(
+        transport_start  = lambda:    calls.append(("start",)),
+        transport_stop   = lambda:    calls.append(("stop",)),
+        transport_locate = lambda fr: calls.append(("locate", fr)),
+        calls            = calls,
+    )
+    monkeypatch.setitem(sys.modules, "midi_event_remapper.jack_ctrl", mock)
+    return mock
+
+
+class TestJackTransportSend:
+    """Tests for the JACK_TRANSPORT send type."""
+
+    def test_locate_runs_non_blocking(self, fake_timer, mock_jack_ctrl):
+        """locate must not block the mididings callback."""
+        import time
+        bs, out = make_bankset({"default": {
+            "PC5": [{"send": "JACK_TRANSPORT", "transport": "locate 0"}],
+        }})
+        t0 = time.time()
+        result = bs.handle(make_pc(5))
+        elapsed = time.time() - t0
+        assert result == []          # no MIDI output
+        assert elapsed < 0.5        # returns immediately
+
+    def test_locate_calls_transport_locate(self, fake_timer, mock_jack_ctrl):
+        """locate <frame> must call jack_ctrl.transport_locate(frame)."""
+        import time
+        bs, out = make_bankset({"default": {
+            "PC5": [{"send": "JACK_TRANSPORT", "transport": "locate 0"}],
+        }})
+        bs.handle(make_pc(5))
+        time.sleep(0.05)   # let the daemon thread complete
+        assert ("locate", 0) in mock_jack_ctrl.calls
+
+    def test_locate_nonzero_frame(self, fake_timer, mock_jack_ctrl):
+        """Frame numbers other than 0 must be forwarded correctly."""
+        import time
+        bs, out = make_bankset({"default": {
+            "PC5": [{"send": "JACK_TRANSPORT", "transport": "locate 48000"}],
+        }})
+        bs.handle(make_pc(5))
+        time.sleep(0.05)
+        assert ("locate", 48000) in mock_jack_ctrl.calls
+
+    def test_start_calls_transport_start(self, fake_timer, mock_jack_ctrl):
+        import time
+        bs, out = make_bankset({"default": {
+            "PC5": [{"send": "JACK_TRANSPORT", "transport": "start"}],
+        }})
+        bs.handle(make_pc(5))
+        time.sleep(0.05)
+        assert ("start",) in mock_jack_ctrl.calls
+
+    def test_stop_calls_transport_stop(self, fake_timer, mock_jack_ctrl):
+        import time
+        bs, out = make_bankset({"default": {
+            "PC5": [{"send": "JACK_TRANSPORT", "transport": "stop"}],
+        }})
+        bs.handle(make_pc(5))
+        time.sleep(0.05)
+        assert ("stop",) in mock_jack_ctrl.calls
+
+    def test_combined_with_midi_send(self, fake_timer, mock_jack_ctrl):
+        """JACK_TRANSPORT in sequence with a MIDI send: MIDI output is returned."""
+        import time
+        bs, out = make_bankset({"default": {
+            "PC5": [
+                {"send": "CC10", "value": 127},
+                {"send": "JACK_TRANSPORT", "transport": "locate 0"},
+            ],
+        }})
+        result = bs.handle(make_pc(5))
+        time.sleep(0.05)
+        assert len(result) == 1
+        assert result[0].ctrl == 10
+        assert ("locate", 0) in mock_jack_ctrl.calls
+
+    def test_delayed_jack_transport(self, fake_timer, mock_jack_ctrl):
+        """delay schedules a timer, just like CMD."""
+        bs, out = make_bankset({"default": {
+            "PC5": [{"send": "JACK_TRANSPORT", "transport": "locate 0",
+                     "delay": 0.1}],
+        }})
+        result = bs.handle(make_pc(5))
+        assert result == []
+        assert len(fake_timer.active()) == 1   # timer was scheduled
+
+    def test_jack_transport_in_gesture(self, fake_timer, mock_jack_ctrl):
+        """JACK_TRANSPORT works inside a gesture sequence."""
+        import time
+        bs, out = make_bankset({"default": {
+            "CC0": {
+                "single": [{"send": "JACK_TRANSPORT", "transport": "stop"}],
+                "long":   [{"send": "JACK_TRANSPORT", "transport": "locate 0"}],
+            },
+        }})
+        bs.handle(make_cc(0, value=127))
+        fake_timer.active()[0].fire()   # long timer fires
+        time.sleep(0.05)
+        assert ("locate", 0) in mock_jack_ctrl.calls

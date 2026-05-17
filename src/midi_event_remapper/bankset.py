@@ -16,6 +16,46 @@ import time
 from midi_event_remapper.midi import build_event, event_key, is_release
 
 
+def _entry_sequences(value):
+    """Yield every sequence list from a raw bank entry value.
+
+    Handles all entry shapes: direct (list), gesture (dict with
+    'single'/'double'/... values that are lists), and toggle (dict
+    with 'a'/'b' values that are lists).
+    """
+    if isinstance(value, list):
+        yield value
+    elif isinstance(value, dict):
+        for v in value.values():
+            if isinstance(v, list):
+                yield v
+
+
+def _parse_transport_cmd(s):
+    """Parse a JACK_TRANSPORT 'transport' string.
+
+    Returns a tuple on success:
+        ('start',)
+        ('stop',)
+        ('locate', frame_int)
+    Returns None if the string is not a recognised command.
+    """
+    s = s.strip()
+    if s == "start":
+        return ("start",)
+    if s == "stop":
+        return ("stop",)
+    if s.startswith("locate"):
+        parts = s.split()
+        if len(parts) == 2:
+            try:
+                frame = int(parts[1])
+                if frame >= 0:
+                    return ("locate", frame)
+            except ValueError:
+                pass
+    return None
+
 class BankSet:
     """
     A named collection of banks.  One bank is active at a time.
@@ -337,6 +377,20 @@ class BankSet:
                             f"{ctx}[{i}]: CMD 'cmd' must be a non-empty string"
                         )
                     continue
+                if send == "JACK_TRANSPORT":
+                    transport = item.get("transport", "")
+                    if not isinstance(transport, str) or not transport.strip():
+                        errors.append(
+                            f"{ctx}[{i}]: JACK_TRANSPORT missing required "
+                            f"'transport' key"
+                        )
+                    elif _parse_transport_cmd(transport) is None:
+                        errors.append(
+                            f"{ctx}[{i}]: JACK_TRANSPORT 'transport' must be "
+                            f"'start', 'stop', or 'locate <frame>' "
+                            f"(got {transport!r})"
+                        )
+                    continue
                 # Wrong keyword checks
                 if send.startswith("CC") and "velocity" in item:
                     errors.append(
@@ -380,7 +434,7 @@ class BankSet:
                             )
                     except ValueError:
                         errors.append(f"{ctx}[{i}]: malformed send {send!r}")
-                elif send not in ("SYSEX", "CMD"):
+                elif send not in ("SYSEX", "CMD", "JACK_TRANSPORT"):
                     errors.append(
                         f"{ctx}[{i}]: unrecognised send {send!r}"
                     )
@@ -515,6 +569,24 @@ class BankSet:
                             k, []
                         ).append(fk)
 
+        # Pre-initialize the JACK client if any sequence uses
+        # JACK_TRANSPORT, so the first action does not incur connection
+        # overhead mid-session.  Wrapped in try/except so --validate
+        # (and test runs) work normally when JACK is not running.
+        if any(
+            isinstance(item, dict) and item.get("send") == "JACK_TRANSPORT"
+            for bank_name, bank in self.banks.items()
+            for key, value in bank.items()
+            if key not in self._BANK_META_KEYS
+            for seq in _entry_sequences(value)
+            for item in seq
+        ):
+            try:
+                from midi_event_remapper import jack_ctrl
+                jack_ctrl.preinit()
+            except Exception:
+                pass  # JACK not running; will retry on first use
+
     def _classify(self, key, value):
         """Infer the behaviour type of a bank entry from its shape."""
         if isinstance(key, tuple):
@@ -559,6 +631,21 @@ class BankSet:
                         self._run_cmd(cmd)
                     else:
                         t = threading.Timer(delay, self._run_cmd, args=(cmd,))
+                        t.daemon = True
+                        t.start()
+                        self._timer_list.append(t)
+                continue
+
+            if send == "JACK_TRANSPORT":
+                transport = item.get("transport", "")
+                if transport:
+                    if delay <= 0:
+                        self._run_jack_transport(transport)
+                    else:
+                        t = threading.Timer(
+                            delay, self._run_jack_transport,
+                            args=(transport,)
+                        )
                         t.daemon = True
                         t.start()
                         self._timer_list.append(t)
@@ -620,6 +707,37 @@ class BankSet:
             except Exception as e:
                 if self._debug:
                     print(f"  [cmd] ERROR running {cmd!r}: {e}")
+
+        t = threading.Thread(target=run, daemon=True)
+        t.start()
+
+    def _run_jack_transport(self, transport_str):
+        """
+        Execute a JACK transport command via the persistent jack.Client.
+
+        Runs in a daemon thread so it does not block the mididings
+        callback.  Unlike CMD (which forks a subprocess), this calls the
+        JACK C library directly via the existing client connection, writing
+        to JACK shared memory.  No fork/exec occurs, so recording clients
+        are not disturbed.
+
+        Safe to call from both the mididings callback and timer threads.
+        """
+        def run():
+            try:
+                from midi_event_remapper import jack_ctrl
+                cmd = _parse_transport_cmd(transport_str)
+                if cmd[0] == "start":
+                    jack_ctrl.transport_start()
+                elif cmd[0] == "stop":
+                    jack_ctrl.transport_stop()
+                else:  # locate -- frame is cmd[1], already validated
+                    jack_ctrl.transport_locate(cmd[1])
+                if self._debug:
+                    print(f"  [jack_transport] {transport_str}")
+            except Exception as e:
+                if self._debug:
+                    print(f"  [jack_transport] ERROR: {e}")
 
         t = threading.Thread(target=run, daemon=True)
         t.start()

@@ -76,8 +76,12 @@
             # Add entries here that should be active regardless of what
             # bank the main BankSet is on.
 
-            # Example: a dedicated record button that always works.
-            # "CC20": [{"send": "CMD", "cmd": "jack_transport start"}],
+            # Example: dedicated transport buttons that work in any bank.
+            # Prefer JACK_TRANSPORT over CMD for transport operations
+            # when other clients are recording (no subprocess overhead).
+            # "CC20": [{"send": "JACK_TRANSPORT", "transport": "start"}],
+            # "CC21": [{"send": "JACK_TRANSPORT", "transport": "stop"}],
+            # "CC22": [{"send": "JACK_TRANSPORT", "transport": "locate 0"}],
         },
     },
 },
@@ -307,6 +311,10 @@
             # stdout/stderr are printed when debug mode is active.
             # The shell is used, so pipes, redirects, and environment
             # variables all work.
+            #
+            # For JACK transport operations (start, stop, locate), prefer
+            # JACK_TRANSPORT below -- it avoids subprocess overhead that
+            # can cause xruns in recording clients.
 
             # "CC5": [{"send": "CMD", "cmd": "jack_transport start"}],
 
@@ -329,6 +337,42 @@
             #         {"send": "CMD",  "cmd": "notify-send 'Bank: layer2'"},
             #     ],
             # },
+
+
+            # ── JACK_TRANSPORT ────────────────────────────────────────────
+            #
+            # Controls JACK transport directly via a persistent JACK client
+            # connection -- no subprocess is spawned, so recording clients
+            # are not disturbed.  The client is created automatically the
+            # first time a JACK_TRANSPORT action is found during loading
+            # and stays open for the lifetime of the session.
+            #
+            # Valid "transport" values:
+            #   "locate <frame>"  -- reposition to sample offset from time
+            #                        zero (0 = start; at 48 kHz, 48000 = 1s)
+            #   "start"           -- begin rolling
+            #   "stop"            -- stop rolling
+            #
+            # The "delay" key is supported, same as for CMD.
+
+            # Rewind to the beginning.
+            # "CC6": [{"send": "JACK_TRANSPORT", "transport": "locate 0"}],
+
+            # Start / stop rolling.
+            # "CC7": [{"send": "JACK_TRANSPORT", "transport": "start"}],
+            # "CC8": [{"send": "JACK_TRANSPORT", "transport": "stop"}],
+
+            # Stop and rewind on a gesture (single = stop, long = rewind).
+            # "CC6": {
+            #     "single": [{"send": "JACK_TRANSPORT", "transport": "stop"}],
+            #     "long":   [{"send": "JACK_TRANSPORT", "transport": "locate 0"}],
+            # },
+
+            # Combined with a MIDI send.
+            # "CC6": [
+            #     {"send": "CC60", "value": 127},
+            #     {"send": "JACK_TRANSPORT", "transport": "locate 0"},
+            # ],
 
         },  # end "default" bank
 

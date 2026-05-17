@@ -327,3 +327,70 @@ class TestCmdValidation:
                 {"send": "CMD",  "cmd": "jack_transport start"},
             ],
         }})
+
+
+class TestJackTransportValidation:
+
+    def test_jack_transport_locate_valid(self):
+        assert_clean({"default": {
+            "PC5": [{"send": "JACK_TRANSPORT", "transport": "locate 0"}],
+        }})
+
+    def test_jack_transport_locate_nonzero(self):
+        assert_clean({"default": {
+            "PC5": [{"send": "JACK_TRANSPORT", "transport": "locate 48000"}],
+        }})
+
+    def test_jack_transport_start_valid(self):
+        assert_clean({"default": {
+            "PC5": [{"send": "JACK_TRANSPORT", "transport": "start"}],
+        }})
+
+    def test_jack_transport_stop_valid(self):
+        assert_clean({"default": {
+            "PC5": [{"send": "JACK_TRANSPORT", "transport": "stop"}],
+        }})
+
+    def test_jack_transport_missing_transport_key(self):
+        assert_error({"default": {
+            "PC5": [{"send": "JACK_TRANSPORT"}],
+        }}, "missing required 'transport' key")
+
+    def test_jack_transport_empty_string(self):
+        assert_error({"default": {
+            "PC5": [{"send": "JACK_TRANSPORT", "transport": ""}],
+        }}, "missing required 'transport' key")
+
+    def test_jack_transport_invalid_command(self):
+        assert_error({"default": {
+            "PC5": [{"send": "JACK_TRANSPORT", "transport": "rewind"}],
+        }}, "'start', 'stop', or 'locate <frame>'")
+
+    def test_jack_transport_locate_missing_frame(self):
+        assert_error({"default": {
+            "PC5": [{"send": "JACK_TRANSPORT", "transport": "locate"}],
+        }}, "'start', 'stop', or 'locate <frame>'")
+
+    def test_jack_transport_locate_negative_frame(self):
+        assert_error({"default": {
+            "PC5": [{"send": "JACK_TRANSPORT", "transport": "locate -1"}],
+        }}, "'start', 'stop', or 'locate <frame>'")
+
+    def test_jack_transport_locate_nonnumeric_frame(self):
+        assert_error({"default": {
+            "PC5": [{"send": "JACK_TRANSPORT", "transport": "locate start"}],
+        }}, "'start', 'stop', or 'locate <frame>'")
+
+    def test_jack_transport_combined_with_midi(self):
+        assert_clean({"default": {
+            "PC5": [
+                {"send": "CC10", "value": 127},
+                {"send": "JACK_TRANSPORT", "transport": "locate 0"},
+            ],
+        }})
+
+    def test_jack_transport_not_flagged_as_unrecognised(self):
+        """JACK_TRANSPORT must not trigger the unrecognised-send error."""
+        assert_clean({"default": {
+            "PC5": [{"send": "JACK_TRANSPORT", "transport": "stop"}],
+        }})
