@@ -72,7 +72,8 @@ Editable install::
     pip install -e ".[dev,rt]"              # with Cython extension
     python setup.py build_ext --inplace      # (also run this step)
 
-The ``[rt]`` extra installs Cython; ``[dev]`` adds pytest.  Re-run
+The ``[rt]`` extra installs Cython; ``[dev]`` adds pytest;
+``[osc]`` installs ``python-osc`` for the ``OSC`` send type.  Re-run
 ``python setup.py build_ext --inplace`` after editing ``midi_core.pyx``.
 
 **Dependencies**
