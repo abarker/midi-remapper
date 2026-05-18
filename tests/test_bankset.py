@@ -1399,3 +1399,200 @@ class TestRepeatAccel:
         self._press(bs, elapsed_s=2.5)   # between 2000 and 4000
         fake_timer.active()[0].fire()
         assert out[0].value == 2         # tier1, not tier2
+
+
+# ---------------------------------------------------------------------------
+# OSC send
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def mock_osc_ctrl(monkeypatch):
+    """Provide a mock osc_ctrl module so OSC tests run without python-osc.
+
+    Patches sys.modules so that the lazy import inside _run_osc_send
+    (``from midi_event_remapper import osc_ctrl``) gets the mock.
+    """
+    import sys, types
+    calls = []
+    mock = types.SimpleNamespace(
+        send    = lambda host, port, address, args:
+                      calls.append(("send", host, port, address, args)),
+        preinit = lambda host, port: calls.append(("preinit", host, port)),
+        calls   = calls,
+    )
+    monkeypatch.setitem(sys.modules, "midi_event_remapper.osc_ctrl", mock)
+    return mock
+
+
+class TestOscSend:
+    """Tests for the OSC send type."""
+
+    def test_send_fires_non_blocking(self, fake_timer, mock_osc_ctrl):
+        """OSC send must not block the mididings callback."""
+        import time
+        bs, out = make_bankset({"default": {
+            "PC5": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+                     "address": "/test", "args": [1]}],
+        }})
+        t0 = time.time()
+        bs.handle(make_pc(5))
+        assert time.time() - t0 < 0.5
+
+    def test_send_correct_arguments(self, fake_timer, mock_osc_ctrl):
+        """send() must be called with the right host, port, address, args."""
+        import time
+        bs, out = make_bankset({"default": {
+            "PC5": [{"send": "OSC", "host": "10.0.0.1", "port": 7400,
+                     "address": "/record/arm", "args": [1, 0.5, "ch1"]}],
+        }})
+        bs.handle(make_pc(5))
+        time.sleep(0.05)
+        sends = [c for c in mock_osc_ctrl.calls if c[0] == "send"]
+        assert len(sends) == 1
+        _, host, port, address, args = sends[0]
+        assert host    == "10.0.0.1"
+        assert port    == 7400
+        assert address == "/record/arm"
+        assert args    == [1, 0.5, "ch1"]
+
+    def test_send_no_args_key(self, fake_timer, mock_osc_ctrl):
+        """Omitting 'args' defaults to an empty list."""
+        import time
+        bs, out = make_bankset({"default": {
+            "PC5": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+                     "address": "/ping"}],
+        }})
+        bs.handle(make_pc(5))
+        time.sleep(0.05)
+        sends = [c for c in mock_osc_ctrl.calls if c[0] == "send"]
+        assert sends[0][4] == []   # args is empty list
+
+    def test_send_empty_args_list(self, fake_timer, mock_osc_ctrl):
+        """Explicit empty args list is forwarded as-is."""
+        import time
+        bs, out = make_bankset({"default": {
+            "PC5": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+                     "address": "/ping", "args": []}],
+        }})
+        bs.handle(make_pc(5))
+        time.sleep(0.05)
+        sends = [c for c in mock_osc_ctrl.calls if c[0] == "send"]
+        assert sends[0][4] == []
+
+    def test_send_integer_arg(self, fake_timer, mock_osc_ctrl):
+        import time
+        bs, out = make_bankset({"default": {
+            "PC5": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+                     "address": "/v", "args": [42]}],
+        }})
+        bs.handle(make_pc(5))
+        time.sleep(0.05)
+        assert mock_osc_ctrl.calls[-1][4] == [42]
+
+    def test_send_float_arg(self, fake_timer, mock_osc_ctrl):
+        import time
+        bs, out = make_bankset({"default": {
+            "PC5": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+                     "address": "/v", "args": [0.75]}],
+        }})
+        bs.handle(make_pc(5))
+        time.sleep(0.05)
+        assert mock_osc_ctrl.calls[-1][4] == [0.75]
+
+    def test_send_string_arg(self, fake_timer, mock_osc_ctrl):
+        import time
+        bs, out = make_bankset({"default": {
+            "PC5": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+                     "address": "/v", "args": ["hello"]}],
+        }})
+        bs.handle(make_pc(5))
+        time.sleep(0.05)
+        assert mock_osc_ctrl.calls[-1][4] == ["hello"]
+
+    def test_send_multiple_targets(self, fake_timer, mock_osc_ctrl):
+        """Two OSC sends in one sequence call send() twice."""
+        import time
+        bs, out = make_bankset({"default": {
+            "PC5": [
+                {"send": "OSC", "host": "127.0.0.1", "port": 9000,
+                 "address": "/a"},
+                {"send": "OSC", "host": "127.0.0.1", "port": 9001,
+                 "address": "/b", "args": [1]},
+            ],
+        }})
+        bs.handle(make_pc(5))
+        time.sleep(0.05)
+        sends = [c for c in mock_osc_ctrl.calls if c[0] == "send"]
+        assert len(sends) == 2
+        assert sends[0][3] == "/a" and sends[0][2] == 9000
+        assert sends[1][3] == "/b" and sends[1][2] == 9001
+
+    def test_send_no_midi_output(self, fake_timer, mock_osc_ctrl):
+        """A pure OSC sequence produces no MIDI output."""
+        bs, out = make_bankset({"default": {
+            "PC5": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+                     "address": "/test"}],
+        }})
+        result = bs.handle(make_pc(5))
+        assert result == []
+
+    def test_send_combined_with_midi(self, fake_timer, mock_osc_ctrl):
+        """OSC send alongside a MIDI send: MIDI output is returned."""
+        import time
+        bs, out = make_bankset({"default": {
+            "PC5": [
+                {"send": "CC10", "value": 127},
+                {"send": "OSC", "host": "127.0.0.1", "port": 9000,
+                 "address": "/trigger"},
+            ],
+        }})
+        result = bs.handle(make_pc(5))
+        time.sleep(0.05)
+        assert len(result) == 1
+        assert result[0].ctrl == 10
+        sends = [c for c in mock_osc_ctrl.calls if c[0] == "send"]
+        assert len(sends) == 1
+
+    def test_send_delayed(self, fake_timer, mock_osc_ctrl):
+        """Delayed OSC send schedules a timer."""
+        bs, out = make_bankset({"default": {
+            "PC5": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+                     "address": "/late", "delay": 0.5}],
+        }})
+        bs.handle(make_pc(5))
+        assert len(fake_timer.active()) == 1
+
+    def test_send_on_gesture(self, fake_timer, mock_osc_ctrl):
+        """OSC send works inside a gesture sequence."""
+        import time
+        bs, out = make_bankset({"default": {
+            "CC0": {
+                "single": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+                             "address": "/single"}],
+                "double": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+                             "address": "/double"}],
+            },
+        }})
+        # Fire single: press, let multi-press window expire
+        bs.handle(make_cc(0, value=127))
+        fake_timer.active()[0].fire()
+        time.sleep(0.05)
+        sends = [c for c in mock_osc_ctrl.calls if c[0] == "send"]
+        assert sends[-1][3] == "/single"
+
+    def test_send_on_toggle(self, fake_timer, mock_osc_ctrl):
+        """OSC send works in a toggle entry."""
+        import time
+        bs, out = make_bankset({"default": {
+            "CC1": {
+                "a": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+                        "address": "/on",  "args": [1]}],
+                "b": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+                        "address": "/off", "args": [0]}],
+            },
+        }})
+        bs.handle(make_cc(1, value=127))   # first press → "a" → /on
+        time.sleep(0.05)
+        sends = [c for c in mock_osc_ctrl.calls if c[0] == "send"]
+        assert sends[-1][3] == "/on"
+        assert sends[-1][4] == [1]

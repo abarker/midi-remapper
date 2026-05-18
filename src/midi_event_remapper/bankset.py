@@ -31,6 +31,23 @@ def _entry_sequences(value):
                 yield v
 
 
+def _validate_osc_args(args):
+    """Validate the 'args' list of an OSC send item.
+
+    Returns an error string on failure, or None if valid.
+    Each element must be int, float, or str (booleans excluded).
+    """
+    if not isinstance(args, list):
+        return "must be a list"
+    for a in args:
+        if isinstance(a, bool) or not isinstance(a, (int, float, str)):
+            return (
+                f"elements must be int, float, or str "
+                f"(got {type(a).__name__!r})"
+            )
+    return None
+
+
 def _parse_transport_cmd(s):
     """Parse a JACK_TRANSPORT 'transport' string.
 
@@ -392,6 +409,37 @@ class BankSet:
                             f"(got {transport!r})"
                         )
                     continue
+                if send == "OSC":
+                    host    = item.get("host", "")
+                    port    = item.get("port")
+                    address = item.get("address", "")
+                    if not isinstance(host, str) or not host.strip():
+                        errors.append(
+                            f"{ctx}[{i}]: OSC missing required 'host'"
+                        )
+                    if port is None:
+                        errors.append(
+                            f"{ctx}[{i}]: OSC missing required 'port'"
+                        )
+                    elif isinstance(port, bool) or not isinstance(port, int) \
+                            or not (1 <= port <= 65535):
+                        errors.append(
+                            f"{ctx}[{i}]: OSC 'port' must be an integer "
+                            f"1-65535 (got {port!r})"
+                        )
+                    if not isinstance(address, str) or \
+                            not address.startswith("/"):
+                        errors.append(
+                            f"{ctx}[{i}]: OSC 'address' must be a string "
+                            f"starting with '/' (got {address!r})"
+                        )
+                    if "args" in item:
+                        err = _validate_osc_args(item["args"])
+                        if err:
+                            errors.append(
+                                f"{ctx}[{i}]: OSC 'args' {err}"
+                            )
+                    continue
                 # Wrong keyword checks
                 if send.startswith("CC") and "velocity" in item:
                     errors.append(
@@ -435,7 +483,7 @@ class BankSet:
                             )
                     except ValueError:
                         errors.append(f"{ctx}[{i}]: malformed send {send!r}")
-                elif send not in ("SYSEX", "CMD", "JACK_TRANSPORT"):
+                elif send not in ("SYSEX", "CMD", "JACK_TRANSPORT", "OSC"):
                     errors.append(
                         f"{ctx}[{i}]: unrecognised send {send!r}"
                     )
@@ -623,23 +671,46 @@ class BankSet:
                             k, []
                         ).append(fk)
 
-        # Pre-initialize the JACK client if any sequence uses
-        # JACK_TRANSPORT, so the first action does not incur connection
-        # overhead mid-session.  Wrapped in try/except so --validate
-        # (and test runs) work normally when JACK is not running.
-        if any(
-            isinstance(item, dict) and item.get("send") == "JACK_TRANSPORT"
-            for bank_name, bank in self.banks.items()
-            for key, value in bank.items()
-            if key not in self._BANK_META_KEYS
-            for seq in _entry_sequences(value)
-            for item in seq
-        ):
+        # Pre-initialise external clients for JACK_TRANSPORT and OSC sends
+        # found in this config.  Done here (loading time, main thread) so
+        # connection overhead does not occur mid-session.  Each block is
+        # wrapped in try/except so --validate and test runs (where neither
+        # JACK nor an OSC server need be running) work normally.
+        _jack_transport = False
+        _osc_targets    = set()
+        for _bn, _bank in self.banks.items():
+            for _k, _v in _bank.items():
+                if _k in self._BANK_META_KEYS:
+                    continue
+                for _seq in _entry_sequences(_v):
+                    for _item in _seq:
+                        if not isinstance(_item, dict):
+                            continue
+                        _s = _item.get("send")
+                        if _s == "JACK_TRANSPORT":
+                            _jack_transport = True
+                        elif _s == "OSC":
+                            _h = _item.get("host", "")
+                            _p = _item.get("port", 0)
+                            if (_h and isinstance(_p, int)
+                                    and not isinstance(_p, bool)
+                                    and 1 <= _p <= 65535):
+                                _osc_targets.add((_h, _p))
+
+        if _jack_transport:
             try:
                 from midi_event_remapper import jack_ctrl
                 jack_ctrl.preinit()
             except Exception:
                 pass  # JACK not running; will retry on first use
+
+        if _osc_targets:
+            try:
+                from midi_event_remapper import osc_ctrl
+                for _h, _p in _osc_targets:
+                    osc_ctrl.preinit(_h, _p)
+            except Exception:
+                pass  # pythonosc not installed or target unreachable
 
     def _classify(self, key, value):
         """Infer the behaviour type of a bank entry from its shape."""
@@ -703,6 +774,18 @@ class BankSet:
                         t.daemon = True
                         t.start()
                         self._timer_list.append(t)
+                continue
+
+            if send == "OSC":
+                if delay <= 0:
+                    self._run_osc_send(item)
+                else:
+                    t = threading.Timer(
+                        delay, self._run_osc_send, args=(item,)
+                    )
+                    t.daemon = True
+                    t.start()
+                    self._timer_list.append(t)
                 continue
 
             if item.get("press_only") and is_release(event):
@@ -792,6 +875,34 @@ class BankSet:
             except Exception as e:
                 if self._debug:
                     print(f"  [jack_transport] ERROR: {e}")
+
+        t = threading.Thread(target=run, daemon=True)
+        t.start()
+
+    def _run_osc_send(self, item):
+        """Send an OSC message via the persistent client pool.
+
+        Runs in a daemon thread so it does not block the mididings
+        callback.  Uses the pre-initialised ``osc_ctrl`` client for the
+        target ``(host, port)`` pair; the UDP send itself is a single
+        non-blocking syscall.
+        """
+        def run():
+            try:
+                from midi_event_remapper import osc_ctrl
+                host    = item["host"]
+                port    = item["port"]
+                address = item["address"]
+                args    = item.get("args", [])
+                osc_ctrl.send(host, port, address, args)
+                if self._debug:
+                    print(
+                        f"  [osc] {host}:{port} "
+                        f"{address} {args}"
+                    )
+            except Exception as e:
+                if self._debug:
+                    print(f"  [osc] ERROR: {e}")
 
         t = threading.Thread(target=run, daemon=True)
         t.start()

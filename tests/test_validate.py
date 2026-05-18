@@ -515,3 +515,147 @@ class TestRepeatAccelValidation:
                 ],
             },
         }}, "CC999_BAD")
+
+
+class TestOscValidation:
+
+    def test_valid_basic(self):
+        assert_clean({"default": {
+            "PC5": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+                     "address": "/test"}],
+        }})
+
+    def test_valid_with_args(self):
+        assert_clean({"default": {
+            "PC5": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+                     "address": "/v", "args": [1, 0.5, "x"]}],
+        }})
+
+    def test_valid_empty_args(self):
+        assert_clean({"default": {
+            "PC5": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+                     "address": "/ping", "args": []}],
+        }})
+
+    def test_valid_port_boundaries(self):
+        assert_clean({"default": {
+            "PC5": [{"send": "OSC", "host": "h", "port": 1,
+                     "address": "/a"}],
+        }})
+        assert_clean({"default": {
+            "PC5": [{"send": "OSC", "host": "h", "port": 65535,
+                     "address": "/a"}],
+        }})
+
+    def test_missing_host(self):
+        assert_error({"default": {
+            "PC5": [{"send": "OSC", "port": 9000, "address": "/a"}],
+        }}, "missing required 'host'")
+
+    def test_empty_host(self):
+        assert_error({"default": {
+            "PC5": [{"send": "OSC", "host": "", "port": 9000, "address": "/a"}],
+        }}, "missing required 'host'")
+
+    def test_missing_port(self):
+        assert_error({"default": {
+            "PC5": [{"send": "OSC", "host": "127.0.0.1", "address": "/a"}],
+        }}, "missing required 'port'")
+
+    def test_port_zero(self):
+        assert_error({"default": {
+            "PC5": [{"send": "OSC", "host": "127.0.0.1", "port": 0,
+                     "address": "/a"}],
+        }}, "1-65535")
+
+    def test_port_too_high(self):
+        assert_error({"default": {
+            "PC5": [{"send": "OSC", "host": "127.0.0.1", "port": 65536,
+                     "address": "/a"}],
+        }}, "1-65535")
+
+    def test_port_is_string(self):
+        assert_error({"default": {
+            "PC5": [{"send": "OSC", "host": "127.0.0.1", "port": "9000",
+                     "address": "/a"}],
+        }}, "1-65535")
+
+    def test_port_is_float(self):
+        assert_error({"default": {
+            "PC5": [{"send": "OSC", "host": "127.0.0.1", "port": 9000.0,
+                     "address": "/a"}],
+        }}, "1-65535")
+
+    def test_port_is_bool(self):
+        # bool is a subclass of int; must be explicitly rejected
+        assert_error({"default": {
+            "PC5": [{"send": "OSC", "host": "127.0.0.1", "port": True,
+                     "address": "/a"}],
+        }}, "1-65535")
+
+    def test_missing_address(self):
+        assert_error({"default": {
+            "PC5": [{"send": "OSC", "host": "127.0.0.1", "port": 9000}],
+        }}, "starting with '/'")
+
+    def test_address_no_leading_slash(self):
+        assert_error({"default": {
+            "PC5": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+                     "address": "no-slash"}],
+        }}, "starting with '/'")
+
+    def test_address_not_a_string(self):
+        assert_error({"default": {
+            "PC5": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+                     "address": 42}],
+        }}, "starting with '/'")
+
+    def test_args_not_a_list(self):
+        assert_error({"default": {
+            "PC5": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+                     "address": "/a", "args": 42}],
+        }}, "must be a list")
+
+    def test_args_element_is_dict(self):
+        assert_error({"default": {
+            "PC5": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+                     "address": "/a", "args": [{}]}],
+        }}, "int, float, or str")
+
+    def test_args_element_is_bool(self):
+        assert_error({"default": {
+            "PC5": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+                     "address": "/a", "args": [True]}],
+        }}, "int, float, or str")
+
+    def test_args_element_is_none(self):
+        assert_error({"default": {
+            "PC5": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+                     "address": "/a", "args": [None]}],
+        }}, "int, float, or str")
+
+    def test_multiple_errors_reported(self):
+        """All three field errors are reported, not just the first."""
+        errs = errors_for({"default": {
+            "PC5": [{"send": "OSC"}],   # missing host, port, address
+        }})
+        texts = " ".join(errs)
+        assert "host" in texts
+        assert "port" in texts
+        assert "'/'" in texts
+
+    def test_not_flagged_as_unrecognised(self):
+        assert_clean({"default": {
+            "PC5": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+                     "address": "/ok"}],
+        }})
+
+    def test_combined_with_midi_and_jack_transport(self):
+        assert_clean({"default": {
+            "PC5": [
+                {"send": "CC10", "value": 127},
+                {"send": "OSC",  "host": "127.0.0.1", "port": 9000,
+                 "address": "/trigger"},
+                {"send": "JACK_TRANSPORT", "transport": "locate 0"},
+            ],
+        }})
