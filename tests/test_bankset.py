@@ -1104,6 +1104,12 @@ def mock_jack_ctrl(monkeypatch):
         calls            = calls,
     )
     monkeypatch.setitem(sys.modules, "midi_event_remapper.jack_ctrl", mock)
+    # Also patch the package attribute: `from midi_event_remapper import
+    # jack_ctrl` checks getattr(package, name) before sys.modules, so
+    # patching sys.modules alone is not enough once jack_ctrl has been
+    # imported as a package attribute by any other module or test file.
+    import midi_event_remapper as _mer
+    monkeypatch.setattr(_mer, "jack_ctrl", mock, raising=False)
     return mock
 
 
@@ -1421,6 +1427,12 @@ def mock_osc_ctrl(monkeypatch):
         calls   = calls,
     )
     monkeypatch.setitem(sys.modules, "midi_event_remapper.osc_ctrl", mock)
+    # Also patch the package attribute: test_osc_ctrl.py imports osc_ctrl
+    # at module level, which sets midi_event_remapper.osc_ctrl as a package
+    # attribute.  Python's `from midi_event_remapper import osc_ctrl` then
+    # returns that attribute directly, bypassing sys.modules entirely.
+    import midi_event_remapper as _mer
+    monkeypatch.setattr(_mer, "osc_ctrl", mock, raising=False)
     return mock
 
 
