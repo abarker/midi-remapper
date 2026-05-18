@@ -900,6 +900,13 @@ class BankSet:
                         f"  [osc] {host}:{port} "
                         f"{address} {args}"
                     )
+            except ModuleNotFoundError:
+                # python-osc is not installed.  Always print this --
+                # silent failure here would be very hard to diagnose.
+                print(
+                    "[osc] ERROR: python-osc is not installed.  "
+                    "Install it with: pip install python-osc"
+                )
             except Exception as e:
                 if self._debug:
                     print(f"  [osc] ERROR: {e}")
