@@ -80,6 +80,9 @@ The ``[rt]`` extra installs Cython; ``[dev]`` adds pytest.  Re-run
 ``mididings``, ``JACK-Client``, a running JACK server (via QjackCtl
 or ``jackd``).
 
+Optional: ``python-osc`` (for the ``OSC`` send type; install with
+``pip install python-osc``).
+
 Quick start
 -----------
 
@@ -539,6 +542,66 @@ The ``"delay"`` key is supported, same as for ``CMD``.
 The ``midi_remapper_ctrl`` client is portless and appears as a passive
 entry in the JACK client list.  No port connections are needed.
 
+OSC sends
+---------
+
+Use ``"OSC"`` to send an OSC message over UDP when an event fires.
+Requires ``python-osc`` (``pip install python-osc``).
+
+One ``SimpleUDPClient`` is created per ``(host, port)`` target when the
+config is loaded and reused for every subsequent send -- no new socket is
+opened at action time::
+
+    # Simple no-argument message.
+    "CC5": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+             "address": "/ping"}],
+
+    # With typed arguments: int, float, and str are all valid.
+    "CC5": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+             "address": "/record/arm", "args": [1]}],
+
+    "CC5": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+             "address": "/fader/level", "args": [0.75]}],
+
+    "CC5": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+             "address": "/scene/load", "args": ["verse"]}],
+
+    # Multiple arguments in one message.
+    "CC5": [{"send": "OSC", "host": "10.0.0.5", "port": 7400,
+             "address": "/channel/set", "args": [1, 0.8, "armed"]}],
+
+    # Multiple targets in one sequence.
+    "CC5": [
+        {"send": "OSC", "host": "127.0.0.1", "port": 9000,
+         "address": "/local/trigger"},
+        {"send": "OSC", "host": "10.0.0.5",  "port": 7400,
+         "address": "/remote/trigger"},
+    ],
+
+    # Combined with a MIDI output and delayed.
+    "CC5": [
+        {"send": "CC50", "value": 127},
+        {"send": "OSC",  "host": "127.0.0.1", "port": 9000,
+         "address": "/cue/fire", "delay": 0.1},
+    ],
+
+    # On a gesture.
+    "CC5": {
+        "single": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+                    "address": "/transport/stop"}],
+        "long":   [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+                    "address": "/transport/locate", "args": [0]}],
+    },
+
+Required keys: ``"host"``, ``"port"``, ``"address"``.
+
+``"address"`` must be a string starting with ``/``.
+
+``"args"`` is optional (default: no-argument message).  Each element
+must be ``int``, ``float``, or ``str``; booleans are not accepted.
+
+``"delay"`` is supported, as for ``CMD`` and ``JACK_TRANSPORT``.
+
 Latency summary
 ---------------
 
@@ -607,6 +670,22 @@ Each output in a sequence is a dict with the following keys:
     JACK transport command string.  Required when ``"send"`` is
     ``"JACK_TRANSPORT"``.  Valid values: ``"locate <frame>"``,
     ``"start"``, ``"stop"``.
+
+``"host"``
+    Destination hostname or IP address.  Required when ``"send"`` is
+    ``"OSC"``.
+
+``"port"``
+    Destination UDP port (integer 1--65535).  Required when ``"send"``
+    is ``"OSC"``.
+
+``"address"``
+    OSC address string (must start with ``/``).  Required when
+    ``"send"`` is ``"OSC"``.
+
+``"args"``
+    List of OSC arguments (optional, default: empty / no-argument
+    message).  Each element must be ``int``, ``float``, or ``str``.
 
 .. note::
 

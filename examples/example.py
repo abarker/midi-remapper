@@ -82,6 +82,14 @@
             # "CC20": [{"send": "JACK_TRANSPORT", "transport": "start"}],
             # "CC21": [{"send": "JACK_TRANSPORT", "transport": "stop"}],
             # "CC22": [{"send": "JACK_TRANSPORT", "transport": "locate 0"}],
+
+            # Example: OSC notification alongside transport (requires
+            # python-osc and a listener on 127.0.0.1:9000).
+            # "CC20": [
+            #     {"send": "JACK_TRANSPORT", "transport": "start"},
+            #     {"send": "OSC", "host": "127.0.0.1", "port": 9000,
+            #      "address": "/transport/start"},
+            # ],
         },
     },
 },
@@ -403,6 +411,65 @@
             # "CC6": [
             #     {"send": "CC60", "value": 127},
             #     {"send": "JACK_TRANSPORT", "transport": "locate 0"},
+            # ],
+
+
+            # ── OSC (Open Sound Control) ──────────────────────────────────
+            #
+            # Sends an OSC message over UDP.  Requires python-osc:
+            #   pip install python-osc
+#
+            # One UDP client per (host, port) target is created when the
+            # config is first loaded and reused for every action; there is
+            # no socket overhead at action time.
+#
+            # Required keys: "host", "port" (int 1-65535), "address"
+            #   (string starting with "/").
+            # Optional:      "args" -- list of int/float/str values;
+            #                          omit for a no-argument message.
+            # "delay" is also supported, same as for CMD.
+
+            # No-argument ping.
+            # "CC9": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+            #          "address": "/ping"}],
+
+            # Single int argument.
+            # "CC9": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+            #          "address": "/record/arm", "args": [1]}],
+
+            # Float and string arguments.
+            # "CC9": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+            #          "address": "/fader", "args": [0.75]}],
+            # "CC9": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+            #          "address": "/scene/load", "args": ["verse"]}],
+
+            # Multiple arguments.
+            # "CC9": [{"send": "OSC", "host": "10.0.0.5", "port": 7400,
+            #          "address": "/channel/set",
+            #          "args": [1, 0.8, "armed"]}],
+
+            # Stop and rewind via OSC on a gesture.
+            # "CC9": {
+            #     "single": [{"send": "OSC", "host": "127.0.0.1",
+            #                 "port": 9000, "address": "/transport/stop"}],
+            #     "long":   [{"send": "OSC", "host": "127.0.0.1",
+            #                 "port": 9000, "address": "/transport/locate",
+            #                 "args": [0]}],
+            # },
+
+            # OSC combined with MIDI output.
+            # "CC9": [
+            #     {"send": "CC90", "value": 127},
+            #     {"send": "OSC",  "host": "127.0.0.1", "port": 9000,
+            #      "address": "/cue/fire"},
+            # ],
+
+            # Two different OSC targets in one action.
+            # "CC9": [
+            #     {"send": "OSC", "host": "127.0.0.1", "port": 9000,
+            #      "address": "/local/trigger"},
+            #     {"send": "OSC", "host": "10.0.0.5",  "port": 7400,
+            #      "address": "/remote/trigger"},
             # ],
 
         },  # end "default" bank
