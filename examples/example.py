@@ -416,9 +416,8 @@
 
             # ── OSC (Open Sound Control) ──────────────────────────────────
             #
-            # Sends an OSC message over UDP.  Requires python-osc:
-            #   pip install python-osc
-#
+            # Sends an OSC message over UDP.
+            #
             # One UDP client per (host, port) target is created when the
             # config is first loaded and reused for every action; there is
             # no socket overhead at action time.

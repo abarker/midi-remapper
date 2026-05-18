@@ -9,12 +9,12 @@ requires-python = ">=3.9"
 dependencies = [
     "mididings",
     "JACK-Client",
+    "python-osc",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest"]
 rt  = ["cython>=3.0"]   # optional: build midi_core Cython extension
-osc = ["python-osc"]    # optional: enable the OSC send type
 
 [project.scripts]
 midi-remapper = "midi_event_remapper.cli:main"

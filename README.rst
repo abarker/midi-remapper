@@ -72,17 +72,13 @@ Editable install::
     pip install -e ".[dev,rt]"              # with Cython extension
     python setup.py build_ext --inplace      # (also run this step)
 
-The ``[rt]`` extra installs Cython; ``[dev]`` adds pytest;
-``[osc]`` installs ``python-osc`` for the ``OSC`` send type.  Re-run
+The ``[rt]`` extra installs Cython; ``[dev]`` adds pytest.  Re-run
 ``python setup.py build_ext --inplace`` after editing ``midi_core.pyx``.
 
 **Dependencies**
 
-``mididings``, ``JACK-Client``, a running JACK server (via QjackCtl
-or ``jackd``).
-
-Optional: ``python-osc`` (for the ``OSC`` send type; install with
-``pip install python-osc``).
+``mididings``, ``JACK-Client``, ``python-osc``, and a running JACK
+server (via QjackCtl or ``jackd``).
 
 Quick start
 -----------
@@ -547,7 +543,6 @@ OSC sends
 ---------
 
 Use ``"OSC"`` to send an OSC message over UDP when an event fires.
-Requires ``python-osc`` (``pip install python-osc``).
 
 One ``SimpleUDPClient`` is created per ``(host, port)`` target when the
 config is loaded and reused for every subsequent send -- no new socket is
