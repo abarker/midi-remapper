@@ -287,6 +287,13 @@ List available banks::
 
     midi-remapper --list-banks mycontroller.py
 
+**Key name case**
+
+Event key names are case-insensitive: ``"cc5"`` is equivalent to
+``"CC5"``, and ``"note60"`` to ``"NOTE60"``.  Chord components are
+normalised individually, so ``"cc1+cc2"`` is the same as ``"CC1+CC2"``.
+Uppercase is conventional in examples and documentation.
+
 Mapping types
 -------------
 

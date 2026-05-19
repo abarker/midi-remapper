@@ -11,6 +11,9 @@
 #
 # Chord keys use '+' notation: "CC1+CC2" instead of ("CC1", "CC2").
 #
+# Event key names are case-insensitive: "cc5" works identically to "CC5",
+# and "cc1+cc2" to "CC1+CC2".  Uppercase is conventional.
+#
 # Live reloading: midi-remapper watches this file for changes while
 # running.  Edit and save; new mappings take effect within one second.
 # The active bank is preserved across reloads.  Pass --no-reload to
@@ -421,7 +424,7 @@
             # One UDP client per (host, port) target is created when the
             # config is first loaded and reused for every action; there is
             # no socket overhead at action time.
-#
+            #
             # Required keys: "host", "port" (int 1-65535), "address"
             #   (string starting with "/").
             # Optional:      "args" -- list of int/float/str values;
