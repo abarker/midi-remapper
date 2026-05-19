@@ -1100,12 +1100,41 @@ class BankSet:
                     break   # tiers are ascending; none beyond this match
 
             if self._debug:
-                tier_note = (
-                    f", elapsed={elapsed_ms:.0f}ms" if accel else ""
-                )
-                print(
-                    f"[gesture:{self.name}] key={key_} -> repeat{tier_note}"
-                )
+                if accel:
+                    # Identify the deepest tier whose threshold has been
+                    # crossed so the log shows exactly which tier is active.
+                    active_tier = None
+                    for _t in sorted(accel, key=lambda t: t["after_ms"]):
+                        if elapsed_ms >= _t["after_ms"]:
+                            active_tier = _t
+                        else:
+                            break
+                    if active_tier:
+                        seq_note = (
+                            ", seq override" if "repeat" in active_tier else ""
+                        )
+                        tier_str = (
+                            f"tier@{active_tier['after_ms']:.0f}ms{seq_note}"
+                        )
+                    else:
+                        tier_str = "no tier"
+                    # Show the interval that will be used for the NEXT timer.
+                    if next_ms is not None:
+                        ms_str = f"{next_ms:.0f}ms"
+                    else:
+                        ms_str = (
+                            f"{entry_.get('repeat_ms', self._repeat_ms):.0f}ms"
+                            f" (base)"
+                        )
+                    print(
+                        f"[gesture:{self.name}] key={key_} -> repeat "
+                        f"elapsed={elapsed_ms:.0f}ms "
+                        f"{tier_str}, next={ms_str}"
+                    )
+                else:
+                    print(
+                        f"[gesture:{self.name}] key={key_} -> repeat"
+                    )
             self._fire_sequence(active_seq, ev_)
             # Reschedule using the active tier's interval (if any).
             self._start_repeat_timer(key_, entry_, ev_, initial=False,

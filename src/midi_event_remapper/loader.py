@@ -135,20 +135,28 @@ from midi_event_remapper.bankset import BankSet
 
 
 def _parse_chord_key(key):
-    """Convert a 'CC1+CC2' string into a tuple ('CC1', 'CC2')."""
-    parts = [k.strip() for k in key.split("+")]
+    """Convert a 'CC1+CC2' string into a tuple ('CC1', 'CC2').
+
+    Each component is uppercased so that 'cc1+cc2', 'CC1+cc2', and
+    'CC1+CC2' all produce the same tuple.
+    """
+    parts = [k.strip().upper() for k in key.split("+")]
     return tuple(sorted(parts))
 
 
 def _convert_keys(bank):
     """
-    Walk a bank dict and convert any 'A+B' string keys into tuples.
+    Walk a bank dict and convert keys to their canonical form:
+      - 'A+B' chord strings  → sorted tuples of uppercased components
+      - plain string keys    → uppercased  ('cc5' → 'CC5')
     Returns a new dict with converted keys.
     """
     result = {}
     for key, value in bank.items():
         if isinstance(key, str) and "+" in key:
             new_key = _parse_chord_key(key)
+        elif isinstance(key, str):
+            new_key = key.upper()
         else:
             new_key = key
         result[new_key] = value
