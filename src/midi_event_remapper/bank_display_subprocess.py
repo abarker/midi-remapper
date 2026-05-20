@@ -127,20 +127,24 @@ class _BankDisplayWindow:
         except Exception:
             pass
 
-    def _setup_sigterm(self):
-        """Register a SIGTERM handler that saves position and exits cleanly.
+    def _setup_signals(self):
+        """Register handlers for SIGTERM and SIGINT that save position and exit.
 
-        This covers the case where the OS or a ``kill`` command delivers
-        SIGTERM to the subprocess directly.  SIGKILL cannot be caught and
-        position will not be saved in that case.
+        SIGTERM covers ``kill <pid>`` directed at the subprocess.
+        SIGINT covers the rare case where the signal reaches the subprocess
+        directly rather than being converted to a KeyboardInterrupt by Python
+        (e.g. a second Ctrl+C while the first is already being handled).
+        The normal Ctrl+C path is handled by the try/except in ``_run_tk``.
+        SIGKILL cannot be caught -- position will not be saved in that case.
         """
         def _handler(signum, frame):
             self._save_position()
             sys.exit(0)
-        try:
-            signal.signal(signal.SIGTERM, _handler)
-        except (OSError, ValueError):
-            pass   # signal cannot be set in some interpreter states
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            try:
+                signal.signal(sig, _handler)
+            except (OSError, ValueError):
+                pass   # signal cannot be set in some interpreter states
 
     # ------------------------------------------------------------------
     # Entry point
@@ -246,11 +250,21 @@ class _BankDisplayWindow:
         else:
             root.protocol("WM_DELETE_WINDOW", self._on_close)
 
-        self._setup_sigterm()
+        self._setup_signals()
         self._restore_position()
         root.update_idletasks()   # let the WM process the geometry request
         root.after(POLL_MS, self._poll)
-        root.mainloop()
+        try:
+            root.mainloop()
+        except KeyboardInterrupt:
+            # Ctrl+C in the parent process sends SIGINT to the whole process
+            # group.  Catch it here so the subprocess exits cleanly rather
+            # than printing a traceback, saving position on the way out.
+            self._save_position()
+            try:
+                root.destroy()
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # Bindings for borderless window
