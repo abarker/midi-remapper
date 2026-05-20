@@ -70,6 +70,7 @@ class _BankDisplayWindow:
         self._deque       = deque()
         self._no_titlebar = no_titlebar
         self._save_pos    = save_pos   # path string, or None
+        self._last_pos    = None       # most recent "+X+Y" from <Configure>
 
         # Tk objects -- created in run(), referenced in callbacks.
         self._root          = None
@@ -87,26 +88,33 @@ class _BankDisplayWindow:
     # Position persistence
     # ------------------------------------------------------------------
 
-    def _save_position(self):
-        """Write the current window position to self._save_pos.
+    def _on_configure(self, event):
+        """Cache the window position whenever the WM moves or resizes it.
 
-        Saves only the position component of the geometry string
-        (e.g. ``+120+45``) so that the window size set by style updates
-        is not locked in across sessions.  Silently ignores all errors
-        so that a read-only filesystem or a bad path never crashes the
-        display.
+        Bound to ``<Configure>`` on the root window.  Keeping a running
+        cache means ``_save_position`` never needs to call back into
+        tkinter at shutdown time, which is important because signal
+        handlers (SIGTERM, SIGINT) interrupt ``mainloop()`` and leave
+        Tcl in a re-entrant state where geometry queries silently fail.
         """
-        if not self._save_pos or self._root is None:
+        geom = self._root.geometry()   # "WxH+X+Y"
+        m = re.search(r'([+-]\d+[+-]\d+)$', geom)
+        if m:
+            self._last_pos = m.group(1)
+
+    def _save_position(self):
+        """Write the cached window position to self._save_pos.
+
+        Uses ``self._last_pos`` (maintained by ``_on_configure``) rather
+        than querying tkinter, so it is safe to call from a signal handler
+        or any other context where the Tk event loop is not running.
+        """
+        if not self._save_pos or not self._last_pos:
             return
         try:
-            geom = self._root.geometry()   # e.g. "400x200+120+45"
-            m = re.search(r'([+-]\d+[+-]\d+)$', geom)
-            if not m:
-                return
-            pos = m.group(1)               # e.g. "+120+45"
             path = Path(self._save_pos)
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(pos)
+            path.write_text(self._last_pos)
         except Exception:
             pass
 
@@ -115,6 +123,9 @@ class _BankDisplayWindow:
 
         Called once during startup, before ``mainloop()``.  Does nothing
         if the file does not exist (first run) or contains invalid data.
+        Also primes ``self._last_pos`` so that an immediate save after
+        restore (e.g. a very quick exit before the window is moved)
+        writes a sensible value.
         """
         if not self._save_pos:
             return
@@ -122,6 +133,7 @@ class _BankDisplayWindow:
             pos = Path(self._save_pos).read_text().strip()
             if re.fullmatch(r'[+-]\d+[+-]\d+', pos):
                 self._root.geometry(pos)
+                self._last_pos = pos   # prime the cache
         except FileNotFoundError:
             pass   # expected on first run
         except Exception:
@@ -207,6 +219,10 @@ class _BankDisplayWindow:
         root.configure(bg=DEFAULT_BG)
         root.attributes("-topmost", True)
         root.resizable(True, True)
+
+        # Keep _last_pos current so _save_position() never needs to
+        # call back into tkinter (unsafe from signal handlers).
+        root.bind("<Configure>", self._on_configure)
 
         if self._no_titlebar:
             root.overrideredirect(True)
