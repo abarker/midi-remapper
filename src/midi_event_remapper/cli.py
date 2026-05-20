@@ -57,18 +57,17 @@ def build_parser():
         prog        = "midi-remapper",
         description = "MIDI event remapper using mididings and JACK.",
         formatter_class = argparse.RawDescriptionHelpFormatter,
-        epilog = (
-            "Config files are plain Python dict literals (no imports).\n"
-            "Chord keys use '+' notation: 'CC1+CC2' instead of ('CC1','CC2').\n"
-            "See the config.py docstring for the full schema.\n"
-        ),
     )
 
     parser.add_argument(
         "configs",
         metavar = "FILE",
         nargs   = "+",
-        help    = "One or more .py config files, each describing one BankSet.",
+        help    = (
+            "One or more .py config files, each describing one BankSet.  "
+            "Files are plain Python dict literals (no imports, no function "
+            "calls).  See the README or example.py for the full schema."
+        ),
     )
 
     parser.add_argument(
