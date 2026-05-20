@@ -64,9 +64,10 @@ class BankDisplay:
     thread exits silently and the main program keeps running.
     """
 
-    def __init__(self, no_titlebar=False):
+    def __init__(self, no_titlebar=False, save_pos=None):
         self._deque        = deque()
         self._no_titlebar  = no_titlebar
+        self._save_pos     = save_pos
         self._proc         = None
         self._relay_thread = None
         self._running      = False
@@ -90,6 +91,8 @@ class BankDisplay:
         ]
         if self._no_titlebar:
             cmd.append("--no-titlebar")
+        if self._save_pos:
+            cmd.extend(["--save-pos", self._save_pos])
 
         self._proc = subprocess.Popen(
             cmd,

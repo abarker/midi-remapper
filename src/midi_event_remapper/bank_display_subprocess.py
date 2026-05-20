@@ -32,9 +32,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
+import signal
 import sys
 import threading
 from collections import deque
+from pathlib import Path
 
 import tkinter as tk
 
@@ -63,9 +66,10 @@ class _BankDisplayWindow:
     Intended to be instantiated and run from ``__main__`` only.
     """
 
-    def __init__(self, no_titlebar: bool = False):
+    def __init__(self, no_titlebar: bool = False, save_pos: str | None = None):
         self._deque       = deque()
         self._no_titlebar = no_titlebar
+        self._save_pos    = save_pos   # path string, or None
 
         # Tk objects -- created in run(), referenced in callbacks.
         self._root          = None
@@ -78,6 +82,65 @@ class _BankDisplayWindow:
         # Drag state for borderless window.
         self._drag_x = 0
         self._drag_y = 0
+
+    # ------------------------------------------------------------------
+    # Position persistence
+    # ------------------------------------------------------------------
+
+    def _save_position(self):
+        """Write the current window position to self._save_pos.
+
+        Saves only the position component of the geometry string
+        (e.g. ``+120+45``) so that the window size set by style updates
+        is not locked in across sessions.  Silently ignores all errors
+        so that a read-only filesystem or a bad path never crashes the
+        display.
+        """
+        if not self._save_pos or self._root is None:
+            return
+        try:
+            geom = self._root.geometry()   # e.g. "400x200+120+45"
+            m = re.search(r'([+-]\d+[+-]\d+)$', geom)
+            if not m:
+                return
+            pos = m.group(1)               # e.g. "+120+45"
+            path = Path(self._save_pos)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(pos)
+        except Exception:
+            pass
+
+    def _restore_position(self):
+        """Apply a previously saved position to the window.
+
+        Called once during startup, before ``mainloop()``.  Does nothing
+        if the file does not exist (first run) or contains invalid data.
+        """
+        if not self._save_pos:
+            return
+        try:
+            pos = Path(self._save_pos).read_text().strip()
+            if re.fullmatch(r'[+-]\d+[+-]\d+', pos):
+                self._root.geometry(pos)
+        except FileNotFoundError:
+            pass   # expected on first run
+        except Exception:
+            pass
+
+    def _setup_sigterm(self):
+        """Register a SIGTERM handler that saves position and exits cleanly.
+
+        This covers the case where the OS or a ``kill`` command delivers
+        SIGTERM to the subprocess directly.  SIGKILL cannot be caught and
+        position will not be saved in that case.
+        """
+        def _handler(signum, frame):
+            self._save_position()
+            sys.exit(0)
+        try:
+            signal.signal(signal.SIGTERM, _handler)
+        except (OSError, ValueError):
+            pass   # signal cannot be set in some interpreter states
 
     # ------------------------------------------------------------------
     # Entry point
@@ -183,6 +246,9 @@ class _BankDisplayWindow:
         else:
             root.protocol("WM_DELETE_WINDOW", self._on_close)
 
+        self._setup_sigterm()
+        self._restore_position()
+        root.update_idletasks()   # let the WM process the geometry request
         root.after(POLL_MS, self._poll)
         root.mainloop()
 
@@ -228,10 +294,12 @@ class _BankDisplayWindow:
 
     def _exit_program(self):
         """Exit menu item: destroy the window and let the subprocess exit."""
+        self._save_position()
         self._root.destroy()
 
     def _on_close(self):
         """WM_DELETE_WINDOW handler for titled mode."""
+        self._save_position()
         self._root.destroy()
 
     # ------------------------------------------------------------------
@@ -244,6 +312,7 @@ class _BankDisplayWindow:
             item = self._deque.popleft()
             if item is None:
                 # Sentinel: EOF from parent or stdin error.  Tear down.
+                self._save_position()
                 self._root.destroy()
                 return
             bankset_name, bank_name, style = item
@@ -294,12 +363,22 @@ def _parse_args(argv=None):
         dest   = "no_titlebar",
         help   = "Remove OS window decoration.",
     )
+    parser.add_argument(
+        "--save-pos",
+        default = None,
+        dest    = "save_pos",
+        metavar = "FILE",
+        help    = "File path for saving and restoring window position.",
+    )
     return parser.parse_args(argv)
 
 
 if __name__ == "__main__":
     args   = _parse_args()
-    window = _BankDisplayWindow(no_titlebar=args.no_titlebar)
+    window = _BankDisplayWindow(
+        no_titlebar = args.no_titlebar,
+        save_pos    = args.save_pos,
+    )
     window.run()
     # Exit normally regardless of why the window closed.  The parent's
     # relay thread will detect the closed pipe via proc.poll() or a

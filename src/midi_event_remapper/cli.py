@@ -32,6 +32,12 @@ Show a live bank name display window during performance:
 Show the display window without an OS title bar:
     midi-remapper actition.py --no-titlebar
 
+Remember the display window position across runs (default path):
+    midi-remapper actition.py --display --save-pos
+
+Remember the position in a specific file:
+    midi-remapper actition.py --display --save-pos ~/mysetup.pos
+
 Disable live config reloading:
     midi-remapper actition.py --no-reload
 
@@ -147,6 +153,27 @@ def build_parser():
         help    = (
             "Remove the OS title bar from the bank display window "
             "(implies --display).  Right-click the window for Exit / Cancel."
+        ),
+    )
+
+    import os
+    _default_pos_file = str(
+        Path(os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config"))
+        / "midi-remapper" / "display.pos"
+    )
+    parser.add_argument(
+        "--save-pos",
+        nargs   = "?",
+        const   = _default_pos_file,
+        default = None,
+        dest    = "save_pos",
+        metavar = "FILE",
+        help    = (
+            "Save the display window position on exit and restore it on the "
+            "next run (implies --display).  With no argument, uses "
+            f"{_default_pos_file}.  "
+            "Pass an explicit path to use a different file, e.g. when "
+            "running multiple configs that need separate positions."
         ),
     )
 
@@ -307,12 +334,15 @@ def main():
         global_config.DEBUG = args.debug
 
     # --display: start the bank name window and wire it into each BankSet.
-    # --no-titlebar implies --display.
+    # --no-titlebar and --save-pos both imply --display.
     display = None
-    if args.display or args.no_titlebar:
+    if args.display or args.no_titlebar or args.save_pos:
         try:
             from midi_event_remapper.bank_display import BankDisplay
-            display = BankDisplay(no_titlebar=args.no_titlebar)
+            display = BankDisplay(
+                no_titlebar = args.no_titlebar,
+                save_pos    = args.save_pos,
+            )
             display.start()
             for bs in banksets:
                 bs._display_fn = display.update
