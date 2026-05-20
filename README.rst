@@ -90,7 +90,7 @@ Quick start
     midi-remapper mycontroller.py
 
 4. Connect your controller's JACK MIDI output to
-   ``midi_event_remapper:in_0`` and ``midi_event_remapper:out_0`` to
+   ``midi_remapper:in_0`` and ``midi_remapper:out_0`` to
    your target application, using QjackCtl's Graph or ``jack_connect``.
 
 Command-line reference
@@ -882,14 +882,14 @@ with ``jack_connect``::
 
     jack_connect \
         "a2j:MyController [20] (capture): MyController MIDI 1" \
-        "midi_event_remapper:in_0"
+        "midi_remapper:in_0"
 
     jack_connect \
-        "midi_event_remapper:out_0" \
+        "midi_remapper:out_0" \
         "Hydrogen-midi:RX"
 
-The client name ``midi_event_remapper`` can be changed via
-``CLIENT_NAME`` in ``config.py``.
+The client name ``midi_remapper`` can be changed with ``--client-name NAME``
+on the command line, or permanently via ``CLIENT_NAME`` in ``config.py``.
 
 Development
 -----------

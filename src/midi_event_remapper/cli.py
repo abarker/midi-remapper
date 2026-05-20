@@ -43,6 +43,9 @@ Disable live config reloading:
 
 Use jack-rt backend for intra-block timestamp precision (SooperLooper):
     midi-remapper actition.py --jack-rt
+
+Override the JACK client name (e.g. when running two instances):
+    midi-remapper actition.py --client-name midi_remapper_2
 """
 import argparse
 import sys
@@ -199,6 +202,18 @@ def build_parser():
             "code in the RT callback can cause xruns in other JACK clients. "
             "Also calls sys.setswitchinterval(0.0001) to reduce GIL "
             "contention."
+        ),
+    )
+
+    parser.add_argument(
+        "--client-name",
+        default = None,
+        dest    = "client_name",
+        metavar = "NAME",
+        help    = (
+            "Override the JACK client name for this session "
+            "(default: CLIENT_NAME in config.py, 'midi_remapper').  "
+            "Useful when running multiple instances simultaneously."
         ),
     )
 
@@ -391,6 +406,9 @@ def main():
             "  WARNING: slow or blocking Python may cause xruns in all\n"
             "  JACK clients.  Keep the handler lean.\n"
         )
+
+    if args.client_name:
+        global_config.CLIENT_NAME = args.client_name
 
     # Start the live reloader when external config files are in use.
     reloader = None

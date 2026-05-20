@@ -199,7 +199,7 @@ by validate() at startup.
 # JACK / mididings connection settings
 # --------------------------------------------------------------------------
 BACKEND     = 'jack'
-CLIENT_NAME = 'mididings_event_remapper'
+CLIENT_NAME = 'midi_remapper'
 IN_PORT     = 'in_0'
 OUT_PORT    = 'out_0'
 
