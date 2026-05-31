@@ -663,6 +663,26 @@ Each output in a sequence is a dict with the following keys:
 ``"delay"``
     Seconds to wait before sending (default 0.0).
 
+``"channel"``
+    MIDI channel for the outgoing event (integer, 1--16 with the default
+    ``data_offset=1``).  If omitted the incoming event's channel is
+    passed through unchanged.  Useful when a single controller button
+    must drive events on multiple channels, or when the output channel
+    should differ from whatever channel the controller sends on::
+
+        # Send CC10 on channel 2 regardless of the incoming channel
+        "CC5": [{"send": "CC10", "value": 127, "channel": 2}],
+
+        # Sequence that fans out to two channels
+        "CC6": [
+            {"send": "NOTE60", "velocity": 127, "channel": 1},
+            {"send": "NOTE60", "velocity": 127, "channel": 2},
+        ],
+
+    The valid range is ``data_offset`` to ``15 + data_offset`` (same
+    convention as channel fields elsewhere in the config).  Out-of-range
+    values are caught by ``--validate`` at startup.
+
 ``"bank"``
     Target bank name.  Required when ``"send"`` is ``"BANK"``.
 

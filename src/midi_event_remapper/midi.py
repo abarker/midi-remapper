@@ -87,6 +87,8 @@ if not _CYTHON_CORE:
 
         Optional keys (with defaults):
             'delay'    -- seconds before sending              (default 0.0)
+            'channel'  -- MIDI channel for the outgoing event; if omitted
+                          the incoming event's channel is passed through.
             CC sends:   'value'    -- CC value 0-127.
                                       If omitted, the incoming event's value
                                       is passed through (event_value).
@@ -101,6 +103,7 @@ if not _CYTHON_CORE:
         this function and will raise ValueError if passed in here.
         """
         send = item["send"]
+        out_channel = item.get("channel", channel)   # override or pass through
         if send.startswith("CC"):
             if "value" in item:
                 value = int(item["value"])
@@ -108,15 +111,15 @@ if not _CYTHON_CORE:
                 value = int(event_value)
             else:
                 value = 127
-            return CtrlEvent(port, channel, int(send[2:]), value)
+            return CtrlEvent(port, out_channel, int(send[2:]), value)
         elif send.startswith("PC"):
-            return ProgramEvent(port, channel, int(send[2:]))
+            return ProgramEvent(port, out_channel, int(send[2:]))
         elif send.startswith("NOTE"):
             n        = int(send[4:])
             velocity = int(item.get("velocity", 127))
             if item.get("note_off"):
-                return NoteOffEvent(port, channel, n, velocity)
-            return NoteOnEvent(port, channel, n, velocity)
+                return NoteOffEvent(port, out_channel, n, velocity)
+            return NoteOnEvent(port, out_channel, n, velocity)
         elif send == "SYSEX":
             sx = item["sysex"]
             return SysExEvent(port, bytes(sx) if isinstance(sx, list) else sx)

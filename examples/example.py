@@ -161,6 +161,17 @@
             # Delayed send (seconds).
             # "CC1": [{"send": "CC11", "value": 127, "delay": 0.1}],
 
+            # Channel override: send on a specific MIDI channel regardless
+            # of the channel the controller sends on.  Omitting "channel"
+            # passes the incoming channel through unchanged.
+            # "CC1": [{"send": "CC11", "value": 127, "channel": 2}],
+
+            # Fan-out to multiple channels in one press.
+            # "CC1": [
+            #     {"send": "NOTE60", "velocity": 127, "channel": 1},
+            #     {"send": "NOTE60", "velocity": 127, "channel": 2},
+            # ],
+
 
             # ── TOGGLE ────────────────────────────────────────────────────
             #

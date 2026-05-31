@@ -137,8 +137,10 @@ cpdef object build_event(object item, int port, int channel,
     ``str.startswith()`` for readability and safety, identical to
     the pure Python version in midi.py.
     """
-    cdef int n, val, vel
+    cdef int n, val, vel, out_channel
     cdef str send = item["send"]
+
+    out_channel = <int>item["channel"] if "channel" in item else channel
 
     if send.startswith("CC"):
         if "value" in item:
@@ -148,18 +150,18 @@ cpdef object build_event(object item, int port, int channel,
         else:
             val = 127
         n = int(send[2:])
-        return CtrlEvent(port, channel, n, val)
+        return CtrlEvent(port, out_channel, n, val)
 
     if send.startswith("PC"):
         n = int(send[2:])
-        return ProgramEvent(port, channel, n)
+        return ProgramEvent(port, out_channel, n)
 
     if send.startswith("NOTE"):
         n   = int(send[4:])
         vel = <int>item.get("velocity", 127)
         if item.get("note_off"):
-            return NoteOffEvent(port, channel, n, vel)
-        return NoteOnEvent(port, channel, n, vel)
+            return NoteOffEvent(port, out_channel, n, vel)
+        return NoteOnEvent(port, out_channel, n, vel)
 
     if send == "SYSEX":
         sx = item["sysex"]

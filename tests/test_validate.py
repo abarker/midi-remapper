@@ -659,3 +659,76 @@ class TestOscValidation:
                 {"send": "JACK_TRANSPORT", "transport": "locate 0"},
             ],
         }})
+
+
+# ---------------------------------------------------------------------------
+# Channel override validation
+# ---------------------------------------------------------------------------
+
+class TestChannelValidation:
+    """'channel' key on CC/PC/NOTE sends: range and type checks."""
+
+    def test_valid_channel_on_cc(self):
+        assert_clean({"default": {
+            "CC5": [{"send": "CC10", "value": 127, "channel": 2}],
+        }})
+
+    def test_valid_channel_on_pc(self):
+        assert_clean({"default": {
+            "CC5": [{"send": "PC7", "channel": 3}],
+        }})
+
+    def test_valid_channel_on_note(self):
+        assert_clean({"default": {
+            "CC5": [{"send": "NOTE60", "velocity": 64, "channel": 1}],
+        }})
+
+    def test_valid_channel_min_boundary(self):
+        # data_offset=1 → valid range 1-16
+        assert_clean({"default": {
+            "CC5": [{"send": "CC10", "value": 127, "channel": 1}],
+        }}, data_offset=1)
+
+    def test_valid_channel_max_boundary(self):
+        assert_clean({"default": {
+            "CC5": [{"send": "CC10", "value": 127, "channel": 16}],
+        }}, data_offset=1)
+
+    def test_valid_channel_data_offset_0(self):
+        # data_offset=0 → valid range 0-15
+        assert_clean({"default": {
+            "CC5": [{"send": "CC10", "value": 127, "channel": 0}],
+        }}, data_offset=0)
+
+    def test_channel_zero_invalid_with_data_offset_1(self):
+        assert_error({"default": {
+            "CC5": [{"send": "CC10", "value": 127, "channel": 0}],
+        }}, "out of range", data_offset=1)
+
+    def test_channel_17_invalid_with_data_offset_1(self):
+        assert_error({"default": {
+            "CC5": [{"send": "CC10", "value": 127, "channel": 17}],
+        }}, "out of range", data_offset=1)
+
+    def test_channel_not_int(self):
+        assert_error({"default": {
+            "CC5": [{"send": "CC10", "value": 127, "channel": "2"}],
+        }}, "'channel' must be an integer")
+
+    def test_channel_bool_rejected(self):
+        # bool is a subclass of int in Python; must be caught explicitly
+        assert_error({"default": {
+            "CC5": [{"send": "CC10", "value": 127, "channel": True}],
+        }}, "'channel' must be an integer")
+
+    def test_channel_float_rejected(self):
+        assert_error({"default": {
+            "CC5": [{"send": "CC10", "value": 127, "channel": 2.0}],
+        }}, "'channel' must be an integer")
+
+    def test_channel_on_sysex_ignored(self):
+        # SYSEX has no channel field; 'channel' key is harmless but not validated
+        assert_clean({"default": {
+            "CC5": [{"send": "SYSEX", "sysex": [0xF0, 0x00, 0xF7],
+                     "channel": 99}],
+        }})

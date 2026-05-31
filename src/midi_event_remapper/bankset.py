@@ -366,6 +366,8 @@ class BankSet:
         errors = []
         pc_min = self._data_offset
         pc_max = 127 + self._data_offset
+        ch_min = self._data_offset
+        ch_max = 15  + self._data_offset
 
         def check_sequence(seq, ctx):
             for i, item in enumerate(seq):
@@ -451,6 +453,20 @@ class BankSet:
                         f"{ctx}[{i}]: NOTE send uses 'value' -- "
                         f"did you mean 'velocity'?"
                     )
+                # Per-item channel override (CC/PC/NOTE only; SYSEX has no channel)
+                if "channel" in item and send not in ("SYSEX",):
+                    ch = item["channel"]
+                    if isinstance(ch, bool) or not isinstance(ch, int):
+                        errors.append(
+                            f"{ctx}[{i}]: 'channel' must be an integer "
+                            f"{ch_min}-{ch_max} (got {ch!r})"
+                        )
+                    elif not (ch_min <= ch <= ch_max):
+                        errors.append(
+                            f"{ctx}[{i}]: 'channel' {ch} out of range "
+                            f"(valid {ch_min}-{ch_max} with "
+                            f"data_offset={self._data_offset})"
+                        )
                 # Range checks
                 if send.startswith("PC"):
                     try:

@@ -174,6 +174,24 @@ class TestBuildEvent:
         with pytest.raises(ValueError, match="unhandled send"):
             build_event(item, port=1, channel=5)
 
+    def test_channel_passthrough_by_default(self):
+        """Without 'channel' in item, incoming channel is preserved."""
+        ev = build_event({"send": "CC10", "value": 1}, port=1, channel=3)
+        assert ev.channel == 3
+
+    def test_channel_override_cc(self):
+        ev = build_event({"send": "CC10", "value": 1, "channel": 2},
+                         port=1, channel=5)
+        assert ev.channel == 2
+
+    def test_channel_override_pc(self):
+        ev = build_event({"send": "PC7", "channel": 2}, port=1, channel=5)
+        assert ev.channel == 2
+
+    def test_channel_override_note(self):
+        ev = build_event({"send": "NOTE60", "channel": 2}, port=1, channel=5)
+        assert ev.channel == 2
+
     def test_empty_send_raises(self):
         """Empty send string must raise ValueError, not crash (e.g. no IndexError).
 
