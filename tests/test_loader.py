@@ -196,7 +196,7 @@ class TestLoadBanksetFile:
         ''')
         result = load_bankset_file(path)
         bs = result.banksets[0]
-        errors = bs.validate()
+        errors, _ = bs.validate()
         assert any("missing required 'send'" in e for e in errors)
 
     def test_list_of_banksets(self):
