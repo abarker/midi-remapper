@@ -114,6 +114,9 @@ means the delay between the physical button press and the output event.
         Gesture multi-press   | After MULTI_PRESS_WINDOW_MS | 300ms (default)
         Gesture long          | At long_ms threshold        | long_ms (hold)
         Gesture single+long   | On quick release            | hold duration
+        Gesture eager_single  | Immediately on press        | ~0ms (single fires
+          + long/double/repeat|                             | at press; deferred
+                              |                             | label fires later)
         Chord multi-press     | After MULTI_PRESS_WINDOW_MS | 300ms (default)
         Gesture repeat        | After repeat_delay_ms, then | repeat_delay_ms,
                               | every repeat_ms             | then repeat_ms
@@ -146,6 +149,16 @@ A gesture entry is a dict containing any subset of:
     "repeat_ms"       -- interval between subsequent repeats (default: 100ms)
     "trigger_value"   -- only dispatch when incoming event value matches
                          (see TRIGGER VALUE below)
+    "eager_single"    -- bool (default False); if True, fire the 'single'
+                         sequence immediately on the first press instead of
+                         waiting for the gesture to resolve.  The deferred
+                         action ('long', 'double', 'triple', 'repeat') still
+                         fires normally in addition.  Zero latency for
+                         'single' while keeping all other gesture labels.
+                         Has no effect (and generates a warning) if no
+                         deferred label is defined alongside 'single'.
+                         A 'BANK' send inside an eager 'single' sequence is
+                         a validation error (see §7 of EAGER_SINGLE_PLAN).
 
 When 'long' or 'repeat' is defined alongside 'double'/'triple', the
 multipress window starts on quick release (not on press), so they compose

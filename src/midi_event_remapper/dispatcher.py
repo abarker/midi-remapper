@@ -132,7 +132,10 @@ def run():
     # Validate all BankSets.
     all_errors = []
     for bs in config.BANK_SETS:
-        all_errors.extend(bs.validate())
+        errs, warns = bs.validate()
+        all_errors.extend(errs)
+        for w in warns:
+            print(f"[startup] warning: {w}")
     if all_errors:
         print("\n[startup] CONFIG ERRORS:")
         for e in all_errors:

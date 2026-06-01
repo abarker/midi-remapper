@@ -242,6 +242,36 @@
             #     "long_ms": 400,
             # },
 
+            # ── EAGER SINGLE ──────────────────────────────────────────────
+            #
+            # Add "eager_single": True to fire "single" immediately on the
+            # first press, eliminating the latency that "long" or "double"
+            # would otherwise impose on the "single" action.
+            # The deferred label (long/double/triple/repeat) resolves at its
+            # normal time and fires in addition -- single is never re-fired.
+            #
+            # Primary use case: live looping buttons that must hit exactly
+            # on the beat (zero latency) while still providing a secondary
+            # action via hold or double-press.
+
+            # Eager + long: CC30 fires instantly on tap, PC1 fires on hold.
+            # Without eager_single, CC30 would wait until key release.
+            # "CC3": {
+            #     "eager_single": True,
+            #     "single":  [{"send": "CC30", "value": 127}],
+            #     "long":    [{"send": "PC1"}],
+            #     "long_ms": 400,
+            # },
+
+            # Eager + double: CC30 fires instantly on tap, CC31 fires on
+            # the second press (from the window timer).
+            # Without eager_single, CC30 would wait 300ms (multi window).
+            # "CC3": {
+            #     "eager_single": True,
+            #     "single": [{"send": "CC30", "value": 127}],
+            #     "double": [{"send": "CC31", "value": 127}],
+            # },
+
             # Hold-repeat -- fires "single" on quick tap; fires "repeat"
             # continuously while held (after repeat_delay_ms, then every
             # repeat_ms).  "long" and "repeat" are mutually exclusive.

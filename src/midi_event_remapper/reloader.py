@@ -113,7 +113,10 @@ class ConfigReloader:
 
         errors = []
         for bs in new_banksets:
-            errors.extend(bs.validate())
+            errs, warns = bs.validate()
+            errors.extend(errs)
+            for w in warns:
+                print(f"[reload] warning: {w}")
         if errors:
             print("[reload] config errors -- keeping current config")
             for e in errors:

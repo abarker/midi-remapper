@@ -122,7 +122,7 @@ class BankSet:
     # Config dict keys that are metadata, not action labels.
     _META_KEYS    = frozenset({"long_ms", "trigger_value", "debounce_ms",
                                "repeat_delay_ms", "repeat_ms", "multi_ms",
-                               "repeat_accel"})
+                               "repeat_accel", "eager_single"})
     # Bank-level keys that are not MIDI event mappings and are skipped during
     # lookup table construction and validation.  "_display" is normally
     # stripped by the loader before the BankSet is constructed; this acts as
@@ -360,10 +360,13 @@ class BankSet:
     def validate(self):
         """
         Check all bank entries for configuration errors.
-        Returns a list of error strings; an empty list means no errors.
-        Called at startup before run().
+        Returns (errors, warnings) — both lists of strings.
+        errors:   non-empty means the config is invalid and should not run.
+        warnings: non-empty means something works but is likely misconfigured.
+        Called at startup before run() and on every hot reload.
         """
-        errors = []
+        errors   = []
+        warnings = []
         pc_min = self._data_offset
         pc_max = 127 + self._data_offset
         ch_min = self._data_offset
@@ -629,6 +632,52 @@ class BankSet:
                                         f"{tctx}: 'repeat_ms' must be "
                                         f"a positive number"
                                     )
+                # eager_single validation (§5)
+                if "eager_single" in value:
+                    es = value["eager_single"]
+                    # §5.3: must be a bool
+                    if not isinstance(es, bool):
+                        errors.append(
+                            f"{ctx}: 'eager_single' must be True or False "
+                            f"(got {es!r})"
+                        )
+                    elif es:
+                        # §5.2: must have a 'single' action to fire eagerly
+                        if "single" not in value:
+                            errors.append(
+                                f"{ctx}: 'eager_single' is set but no "
+                                f"'single' action is defined -- "
+                                f"nothing to fire eagerly"
+                            )
+                        else:
+                            # §5.4: BANK send inside an eager single is
+                            # forbidden -- a mid-gesture bank switch corrupts
+                            # deferred-action routing and gesture state.
+                            for _item in value["single"]:
+                                if (isinstance(_item, dict)
+                                        and _item.get("send") == "BANK"):
+                                    errors.append(
+                                        f"{ctx}: 'BANK' send is not allowed "
+                                        f"in the 'single' sequence of an "
+                                        f"eager_single entry -- switching "
+                                        f"banks mid-gesture would leave the "
+                                        f"deferred action bound to the "
+                                        f"wrong bank"
+                                    )
+                                    break
+                        # §5.1: flag has no effect when there are no
+                        # deferred labels -- 'single' already fires
+                        # immediately in that case.
+                        has_deferred = any(k in value
+                                           for k in ("double", "triple",
+                                                     "long", "repeat"))
+                        if not has_deferred:
+                            warnings.append(
+                                f"{ctx}: 'eager_single' is set but no "
+                                f"'double', 'triple', 'long', or 'repeat' "
+                                f"is defined -- 'single' already fires "
+                                f"immediately; the flag has no effect"
+                            )
             elif etype == "chord":
                 if "long" in value:
                     errors.append(
@@ -651,7 +700,7 @@ class BankSet:
                 f"{self.active_bank!r} not found in banks"
             )
 
-        return errors
+        return errors, warnings
 
     # ------------------------------------------------------------------
     # Internal setup
@@ -1021,8 +1070,18 @@ class BankSet:
             # Start the initial repeat delay timer.
             self._start_repeat_timer(key, entry, event, initial=True)
 
-        # Suppress the press; dispatch happens on release or timer.
-        return []
+        # eager_single: fire 'single' immediately on the first press, then
+        # let the deferred action (long/double/repeat) resolve normally.
+        # The suppression guards in _reset_gesture_timer and
+        # _handle_gesture_release prevent single from firing a second time.
+        eager_events = []
+        if (entry.get("eager_single")
+                and has_single
+                and self._gesture_counts[key] == 1):
+            eager_events = self._execute_sequence(entry["single"], event)
+
+        # Suppress the press; deferred dispatch happens on release or timer.
+        return eager_events
 
     def _start_long_timer(self, key, entry, event):
         """
@@ -1222,7 +1281,7 @@ class BankSet:
             if not has_multi:
                 self._gesture_counts.pop(key, None)
                 self._gesture_events.pop(key, None)
-                if "single" in entry:
+                if "single" in entry and not entry.get("eager_single"):
                     return self._execute_sequence(entry["single"], event)
                 return []
             self._reset_gesture_timer(key, entry, event)
@@ -1241,7 +1300,7 @@ class BankSet:
                 if not has_multi:
                     self._gesture_counts.pop(key, None)
                     self._gesture_events.pop(key, None)
-                    if "single" in entry:
+                    if "single" in entry and not entry.get("eager_single"):
                         return self._execute_sequence(entry["single"], event)
                     return []
                 self._reset_gesture_timer(key, entry, event)
@@ -1277,7 +1336,9 @@ class BankSet:
                     f"[gesture:{self.name}] key={key_} "
                     f"count={count} -> {label}"
                 )
-            if label and label in entry_:
+            if label == "single" and entry_.get("eager_single"):
+                pass    # already fired eagerly at press
+            elif label and label in entry_:
                 self._fire_sequence(entry_[label], ev)
 
         window_ms = entry.get("multi_ms", self._multi_press_window_ms)

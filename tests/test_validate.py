@@ -10,7 +10,15 @@ from conftest import make_bankset
 def errors_for(banks, active_bank="default", data_offset=1):
     bs, _ = make_bankset(banks, active_bank=active_bank,
                          data_offset=data_offset)
-    return bs.validate()
+    errs, _warns = bs.validate()
+    return errs
+
+
+def warnings_for(banks, active_bank="default", data_offset=1):
+    bs, _ = make_bankset(banks, active_bank=active_bank,
+                         data_offset=data_offset)
+    _errs, warns = bs.validate()
+    return warns
 
 
 def assert_clean(banks, **kwargs):
@@ -239,14 +247,14 @@ class TestStructuralErrors:
 
     def test_active_bank_not_in_banks(self):
         bs, _ = make_bankset({"default": {}}, active_bank="missing")
-        errs = bs.validate()
+        errs, _ = bs.validate()
         assert any("active_bank" in e for e in errs)
 
     def test_unclassifiable_entry(self):
         bs, _ = make_bankset({"default": {
             "PC1": {"unknown_key": "something"},
         }})
-        errs = bs.validate()
+        errs, _ = bs.validate()
         assert any("cannot classify" in e for e in errs)
 
     def test_multiple_errors_all_reported(self):
@@ -732,3 +740,157 @@ class TestChannelValidation:
             "CC5": [{"send": "SYSEX", "sysex": [0xF0, 0x00, 0xF7],
                      "channel": 99}],
         }})
+
+
+# ---------------------------------------------------------------------------
+# eager_single validation (§5 of EAGER_SINGLE_PLAN)
+# ---------------------------------------------------------------------------
+
+class TestEagerSingleValidation:
+    """validate() checks for eager_single misuse (§5.1–§5.4)."""
+
+    # ------------------------------------------------------------------
+    # Valid uses → no error, no warning
+    # ------------------------------------------------------------------
+
+    def test_valid_with_double(self):
+        assert_clean({"default": {
+            "CC5": {
+                "eager_single": True,
+                "single": [{"send": "CC10", "value": 1}],
+                "double": [{"send": "CC11", "value": 2}],
+            },
+        }})
+
+    def test_valid_with_long(self):
+        assert_clean({"default": {
+            "CC5": {
+                "eager_single": True,
+                "single": [{"send": "CC10", "value": 1}],
+                "long":   [{"send": "CC11", "value": 2}],
+            },
+        }})
+
+    def test_valid_with_repeat(self):
+        assert_clean({"default": {
+            "CC5": {
+                "eager_single": True,
+                "single": [{"send": "CC10", "value": 1}],
+                "repeat": [{"send": "CC11", "value": 2}],
+            },
+        }})
+
+    def test_valid_with_triple(self):
+        assert_clean({"default": {
+            "CC5": {
+                "eager_single": True,
+                "single": [{"send": "CC10", "value": 1}],
+                "triple": [{"send": "CC11", "value": 2}],
+            },
+        }})
+
+    def test_false_value_no_error(self):
+        """eager_single: False is valid (just a no-op)."""
+        assert_clean({"default": {
+            "CC5": {
+                "eager_single": False,
+                "single": [{"send": "CC10", "value": 1}],
+                "double": [{"send": "CC11", "value": 2}],
+            },
+        }})
+
+    # ------------------------------------------------------------------
+    # §5.1 — only-single entry → warning, not error
+    # ------------------------------------------------------------------
+
+    def test_only_single_produces_warning(self):
+        """eager_single with no deferred labels → warning."""
+        warns = warnings_for({"default": {
+            "CC5": {
+                "eager_single": True,
+                "single": [{"send": "CC10", "value": 1}],
+            },
+        }})
+        assert any("flag has no effect" in w for w in warns)
+
+    def test_only_single_no_error(self):
+        """eager_single with no deferred labels → no error (still valid config)."""
+        assert errors_for({"default": {
+            "CC5": {
+                "eager_single": True,
+                "single": [{"send": "CC10", "value": 1}],
+            },
+        }}) == []
+
+    # ------------------------------------------------------------------
+    # §5.2 — no 'single' action → hard error
+    # ------------------------------------------------------------------
+
+    def test_no_single_action_is_error(self):
+        assert_error({"default": {
+            "CC5": {
+                "eager_single": True,
+                "double": [{"send": "CC11", "value": 2}],
+            },
+        }}, "no 'single' action is defined")
+
+    # ------------------------------------------------------------------
+    # §5.3 — non-bool value → hard error
+    # ------------------------------------------------------------------
+
+    def test_non_bool_int_is_error(self):
+        assert_error({"default": {
+            "CC5": {
+                "eager_single": 1,
+                "single": [{"send": "CC10", "value": 1}],
+                "double": [{"send": "CC11", "value": 2}],
+            },
+        }}, "must be True or False")
+
+    def test_non_bool_string_is_error(self):
+        assert_error({"default": {
+            "CC5": {
+                "eager_single": "yes",
+                "single": [{"send": "CC10", "value": 1}],
+                "double": [{"send": "CC11", "value": 2}],
+            },
+        }}, "must be True or False")
+
+    # ------------------------------------------------------------------
+    # §5.4 — BANK send inside eager single → hard error
+    # ------------------------------------------------------------------
+
+    def test_bank_in_eager_single_is_error(self):
+        assert_error({
+            "default": {
+                "CC5": {
+                    "eager_single": True,
+                    "single": [{"send": "BANK", "bank": "other"}],
+                    "double": [{"send": "CC11", "value": 2}],
+                },
+            },
+            "other": {},
+        }, "'BANK' send is not allowed")
+
+    def test_bank_in_eager_single_mentions_mid_gesture(self):
+        """Error message explains why BANK is forbidden."""
+        errs = errors_for({
+            "default": {
+                "CC5": {
+                    "eager_single": True,
+                    "single": [{"send": "BANK", "bank": "other"}],
+                    "double": [{"send": "CC11", "value": 2}],
+                },
+            },
+            "other": {},
+        })
+        assert any("wrong bank" in e for e in errs)
+
+    def test_bank_in_non_eager_single_is_ok(self):
+        """BANK inside a non-eager single is still perfectly valid."""
+        assert_clean({
+            "default": {
+                "CC5": [{"send": "BANK", "bank": "other"}],
+            },
+            "other": {},
+        })

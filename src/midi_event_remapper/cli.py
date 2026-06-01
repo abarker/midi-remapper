@@ -322,13 +322,17 @@ def main():
     if args.validate:
         all_errors = []
         for bs in banksets:
-            errs = bs.validate()
+            errs, warns = bs.validate()
+            if warns:
+                print(f"\n[validate] BankSet {bs.name!r} warnings:")
+                for w in warns:
+                    print(f"  ! {w}")
             if errs:
-                print(f"\n[validate] BankSet {bs.name!r}:")
+                print(f"\n[validate] BankSet {bs.name!r} errors:")
                 for e in errs:
                     print(f"  x {e}")
                 all_errors.extend(errs)
-            else:
+            elif not warns:
                 print(f"[validate] BankSet {bs.name!r}: OK")
         if all_errors:
             sys.exit(1)

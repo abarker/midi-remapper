@@ -1608,3 +1608,186 @@ class TestOscSend:
         sends = [c for c in mock_osc_ctrl.calls if c[0] == "send"]
         assert sends[-1][3] == "/on"
         assert sends[-1][4] == [1]
+
+
+# ---------------------------------------------------------------------------
+# eager_single
+# ---------------------------------------------------------------------------
+
+class TestEagerSingle:
+    """
+    Behavioural tests for the eager_single flag (§4 of EAGER_SINGLE_PLAN).
+
+    Scenarios follow the plan's behaviour walkthrough exactly:
+    single fires at press time; long/double/repeat fire in addition,
+    never re-firing single.
+    """
+
+    # ------------------------------------------------------------------
+    # eager_single + double
+    # ------------------------------------------------------------------
+
+    def test_with_double_single_fires_on_press(self, fake_timer):
+        """Press fires single immediately with no window delay."""
+        bs, out = make_bankset({"default": {
+            "CC5": {
+                "eager_single": True,
+                "single": [{"send": "CC10", "value": 1}],
+                "double": [{"send": "CC11", "value": 2}],
+            },
+        }})
+        result = bs.handle(make_cc(5, value=127))
+        # single fires immediately at press
+        assert len(result) == 1
+        assert result[0].ctrl == 10
+
+    def test_with_double_lone_tap_fires_single_only(self, fake_timer):
+        """Single tap → single fires at press; window fires nothing extra."""
+        bs, out = make_bankset({"default": {
+            "CC5": {
+                "eager_single": True,
+                "single": [{"send": "CC10", "value": 1}],
+                "double": [{"send": "CC11", "value": 2}],
+            },
+        }})
+        result = bs.handle(make_cc(5, value=127))
+        assert result[0].ctrl == 10        # eager single fired
+        bs.handle(make_cc(5, value=0))     # release
+        assert len(fake_timer.active()) == 1
+        fake_timer.active()[0].fire()      # window timer: count=1, single suppressed
+        assert out == []                   # no second single via _fire_sequence
+
+    def test_with_double_double_tap_fires_single_and_double(self, fake_timer):
+        """Two presses → eager single on press1; double fires from window timer."""
+        bs, out = make_bankset({"default": {
+            "CC5": {
+                "eager_single": True,
+                "single": [{"send": "CC10", "value": 1}],
+                "double": [{"send": "CC11", "value": 2}],
+            },
+        }})
+        # press 1 → eager single
+        result1 = bs.handle(make_cc(5, value=127))
+        assert result1[0].ctrl == 10
+        bs.handle(make_cc(5, value=0))
+        # press 2 resets the window timer
+        result2 = bs.handle(make_cc(5, value=127))
+        assert result2 == []               # count=2, no eager fire (only on count==1)
+        bs.handle(make_cc(5, value=0))
+        # fire window timer with count=2 → double
+        fake_timer.active()[0].fire()
+        assert len(out) == 1
+        assert out[0].ctrl == 11           # double, not a second single
+
+    # ------------------------------------------------------------------
+    # eager_single + long
+    # ------------------------------------------------------------------
+
+    def test_with_long_short_press_fires_single_only(self, fake_timer):
+        """Short press → eager single at press; quick release → single suppressed."""
+        bs, out = make_bankset({"default": {
+            "CC5": {
+                "eager_single": True,
+                "single": [{"send": "CC10", "value": 1}],
+                "long":   [{"send": "CC11", "value": 2}],
+            },
+        }}, long_press_ms=500)
+        result = bs.handle(make_cc(5, value=127))
+        assert result[0].ctrl == 10        # eager single
+        release = bs.handle(make_cc(5, value=0))
+        assert release == []               # single suppressed by eager guard
+        assert out == []                   # no extra events via _output_fn
+
+    def test_with_long_held_fires_single_and_long(self, fake_timer):
+        """Hold past threshold → eager single at press, long from timer."""
+        bs, out = make_bankset({"default": {
+            "CC5": {
+                "eager_single": True,
+                "single": [{"send": "CC10", "value": 1}],
+                "long":   [{"send": "CC11", "value": 2}],
+            },
+        }}, long_press_ms=500)
+        result = bs.handle(make_cc(5, value=127))
+        assert result[0].ctrl == 10        # eager single on press
+        # fire the long timer
+        long_timers = [t for t in fake_timer.active() if t.delay >= 0.4]
+        assert len(long_timers) == 1
+        long_timers[0].fire()
+        assert len(out) == 1
+        assert out[0].ctrl == 11           # long fires; single not repeated
+
+    # ------------------------------------------------------------------
+    # eager_single + repeat
+    # ------------------------------------------------------------------
+
+    def test_with_repeat_quick_tap_fires_single_only(self, fake_timer):
+        """Quick release before first repeat → single fires at press only."""
+        bs, out = make_bankset({"default": {
+            "CC5": {
+                "eager_single": True,
+                "single": [{"send": "CC10", "value": 1}],
+                "repeat": [{"send": "CC11", "value": 2}],
+            },
+        }})
+        result = bs.handle(make_cc(5, value=127))
+        assert result[0].ctrl == 10        # eager single on press
+        release = bs.handle(make_cc(5, value=0))
+        assert release == []               # single suppressed on quick-tap path
+        assert out == []
+
+    def test_with_repeat_held_fires_single_then_repeats(self, fake_timer):
+        """Hold → single at press, then repeats; release does not re-fire single."""
+        bs, out = make_bankset({"default": {
+            "CC5": {
+                "eager_single": True,
+                "single": [{"send": "CC10", "value": 1}],
+                "repeat": [{"send": "CC11", "value": 2}],
+            },
+        }})
+        result = bs.handle(make_cc(5, value=127))
+        assert result[0].ctrl == 10        # eager single on press
+        # fire the repeat delay timer → first repeat
+        fake_timer.active()[0].fire()
+        assert len(out) == 1
+        assert out[0].ctrl == 11           # repeat (not a second single)
+        # fire second repeat
+        fake_timer.active()[0].fire()
+        assert len(out) == 2
+        # release after repeats fires nothing
+        release = bs.handle(make_cc(5, value=0))
+        assert release == []
+        assert len(out) == 2
+
+    # ------------------------------------------------------------------
+    # only-single entry (fast path, flag redundant)
+    # ------------------------------------------------------------------
+
+    def test_only_single_fires_immediately(self):
+        """eager_single on a single-only entry: fires immediately (same as without)."""
+        bs, out = make_bankset({"default": {
+            "CC5": {
+                "eager_single": True,
+                "single": [{"send": "CC10", "value": 1}],
+            },
+        }})
+        result = bs.handle(make_cc(5, value=127))
+        # single-only fast path fires before eager block; behaviour unchanged
+        assert len(result) == 1
+        assert result[0].ctrl == 10
+
+    # ------------------------------------------------------------------
+    # Entry without eager_single: no behaviour change
+    # ------------------------------------------------------------------
+
+    def test_without_flag_single_deferred_to_release(self, fake_timer):
+        """Without eager_single, single+double still defers single to window."""
+        bs, out = make_bankset({"default": {
+            "CC5": {
+                "single": [{"send": "CC10", "value": 1}],
+                "double": [{"send": "CC11", "value": 2}],
+            },
+        }})
+        result = bs.handle(make_cc(5, value=127))
+        assert result == []                # suppressed; no eager fire
+        fake_timer.active()[0].fire()
+        assert out[0].ctrl == 10           # single fires from window timer

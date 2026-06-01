@@ -415,6 +415,43 @@ keys too::
         "long":   [{"send": "CC11", "value": 127}],
     },
 
+**Eager single** (zero-latency press + deferred action)
+
+Add ``"eager_single": True`` to fire ``"single"`` immediately on the first
+press while still allowing ``"long"``, ``"double"``, ``"triple"``, or
+``"repeat"`` to resolve normally afterward.  This is the pattern to use when
+you need zero-latency looper hits but still want a hold or double-press for a
+secondary action::
+
+    # Tap fires CC10 instantly; hold fires CC11 after the threshold.
+    # Without eager_single, single would wait until key release -- adding
+    # up to long_press_ms of latency for a short tap.
+    "CC5": {
+        "eager_single": True,
+        "single": [{"send": "CC10", "value": 127}],
+        "long":   [{"send": "CC11", "value": 127}],
+    },
+
+    # Tap fires CC10 instantly; double-tap fires CC20 from the window timer.
+    # Without eager_single, single would wait 300ms (MULTI_PRESS_WINDOW_MS).
+    "CC5": {
+        "eager_single": True,
+        "single": [{"send": "CC10", "value": 127}],
+        "double": [{"send": "CC20", "value": 127}],
+    },
+
+Behaviour: on each first press, ``"single"`` fires immediately and is then
+forgotten.  ``"long"`` / ``"double"`` / ``"triple"`` / ``"repeat"`` still
+resolve at their normal times and fire in addition, never re-firing
+``"single"``.
+
+Constraints: ``"eager_single": True`` requires a ``"single"`` key.  A
+``"BANK"`` send inside an eager ``"single"`` sequence is a validation
+error (switching banks mid-gesture corrupts deferred-action routing).
+Setting the flag with no deferred labels (only ``"single"`` defined)
+is harmless but generates a startup warning, since the fast path already
+fires ``"single"`` immediately in that case.
+
 **Chord**
 
 Fires when all keys in the tuple arrive within ``CHORD_WINDOW_MS``
@@ -630,6 +667,10 @@ Latency summary
 +-----------------------------------+------------------------------+
 | Gesture single + long (single)    | On quick release             |
 +-----------------------------------+------------------------------+
+| Gesture eager_single (single)     | Immediately on press (~0ms)  |
++-----------------------------------+------------------------------+
+| Gesture eager_single (long/double)| At their normal times        |
++-----------------------------------+------------------------------+
 | Gesture repeat (first)            | After repeat_delay_ms (500ms)|
 +-----------------------------------+------------------------------+
 | Gesture repeat (subsequent)       | Every repeat_ms (100ms)      |
@@ -714,6 +755,14 @@ Each output in a sequence is a dict with the following keys:
 
     Using ``"velocity"`` on a CC send or ``"value"`` on a NOTE send is a
     config error caught by ``--validate`` at startup.
+
+``"eager_single"``
+    Boolean (``True`` or ``False``, default ``False``).  Applies to gesture
+    entries only.  When ``True``, fires the ``"single"`` sequence immediately
+    on the first press, then lets ``"long"``, ``"double"``, ``"triple"``, and
+    ``"repeat"`` resolve normally.  Eliminates the latency that ``"long"`` or
+    ``"double"`` would otherwise impose on the ``"single"`` action.  See
+    `Gesture mappings`_ for usage examples and constraints.
 
 Trigger value filtering
 -----------------------
