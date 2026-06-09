@@ -15,6 +15,14 @@ import time
 
 from midi_event_remapper.midi import build_event, event_key, is_release
 
+# Delays at or below this threshold are sent synchronously rather than
+# spawning a threading.Timer.  Any delay <= 1 ms is musically meaningless
+# (JACK buffer periods are longer), so the events are sent immediately.
+# This lets configs use "delay": 0.001 as a no-op sentinel without spawning
+# a thread, while still allowing real delays like 0.200 to use the timer.
+# The smallest meaningful real delay is therefore 0.002 s (2 ms).
+_IMMEDIATE_DELAY_S = 0.001
+
 
 def _entry_sequences(value):
     """Yield every sequence list from a raw bank entry value.
@@ -198,6 +206,14 @@ class BankSet:
         # Keep timer references alive until they fire.
         self._timer_list = []
 
+        # Per-thread tracking for delayed MIDI sends: (thread, due_at, desc).
+        # Used by _cleanup_timers to detect threads stuck in _output_fn.
+        self._delay_send_threads = []
+        # Thread ids already warned about; cleared when the thread completes.
+        self._stuck_delay_ids    = set()
+        # Timestamp of last leak check; drives the time-based cleanup trigger.
+        self._last_leak_check    = 0.0
+
         # Precomputed lookup tables
         self._entry_types   = {}   # (bank_name, key) -> type string
         self._chord_members = {}   # bank_name -> {key -> [frozenset, ...]}
@@ -236,6 +252,8 @@ class BankSet:
         for t in self._timer_list:
             t.cancel()
         self._timer_list.clear()
+        self._delay_send_threads.clear()
+        self._stuck_delay_ids.clear()
 
     @property
     def current_bank(self):
@@ -284,9 +302,15 @@ class BankSet:
         if self._debug:
             print(f"[BankSet:{self.name}] handle key={key}")
 
-        # Periodically remove dead timers to prevent unbounded growth.
+        # Periodically remove dead timers to prevent unbounded growth, and
+        # check for delay-send threads that may be stuck in _output_fn.
         if len(self._timer_list) > 50:
             self._cleanup_timers()
+        elif self._delay_send_threads:
+            _now = time.monotonic()
+            if _now - self._last_leak_check > 5.0:
+                self._last_leak_check = _now
+                self._cleanup_timers()
 
         rel = is_release(event)
 
@@ -707,14 +731,39 @@ class BankSet:
     # ------------------------------------------------------------------
 
     def _cleanup_timers(self):
-        """Remove completed or cancelled timers from _timer_list.
+        """Remove completed timers and warn about hung delay-send threads.
 
         Each chord window, gesture timer, and delayed send creates a
         threading.Timer (which is a thread).  Without cleanup, the list
         grows indefinitely with dead threads, eventually causing hangs.
-        Called automatically from handle() when the list exceeds 50 entries.
+        Called from handle() when the list exceeds 50 entries OR when
+        delay-send threads are pending and 5 seconds have elapsed since
+        the last check.
+
+        Hung detection: a delay-send thread that is still alive more than
+        1 second past its scheduled fire time is probably blocked inside
+        _output_fn waiting on a stalled JACK graph.  A warning is printed
+        once per thread (not on every subsequent check).
         """
+        now = time.monotonic()
         self._timer_list = [t for t in self._timer_list if t.is_alive()]
+
+        live = []
+        for t, due_at, desc in self._delay_send_threads:
+            if t.is_alive():
+                overdue = now - due_at
+                if overdue > 1.0 and id(t) not in self._stuck_delay_ids:
+                    self._stuck_delay_ids.add(id(t))
+                    print(
+                        f"[{self.name}] WARNING: delayed MIDI send stuck "
+                        f"{overdue:.1f}s past due — _output_fn may be "
+                        f"blocked (JACK graph stalled?): {desc}"
+                    )
+                live.append((t, due_at, desc))
+            else:
+                # Thread completed normally; retire its warned-id if present.
+                self._stuck_delay_ids.discard(id(t))
+        self._delay_send_threads = live
 
     def _build_lookup_tables(self):
         for bank_name, bank in self.banks.items():
@@ -817,7 +866,7 @@ class BankSet:
             if send == "CMD":
                 cmd = item.get("cmd", "")
                 if cmd:
-                    if delay <= 0:
+                    if delay <= _IMMEDIATE_DELAY_S:
                         self._run_cmd(cmd)
                     else:
                         t = threading.Timer(delay, self._run_cmd, args=(cmd,))
@@ -829,7 +878,7 @@ class BankSet:
             if send == "JACK_TRANSPORT":
                 transport = item.get("transport", "")
                 if transport:
-                    if delay <= 0:
+                    if delay <= _IMMEDIATE_DELAY_S:
                         self._run_jack_transport(transport)
                     else:
                         t = threading.Timer(
@@ -842,7 +891,7 @@ class BankSet:
                 continue
 
             if send == "OSC":
-                if delay <= 0:
+                if delay <= _IMMEDIATE_DELAY_S:
                     self._run_osc_send(item)
                 else:
                     t = threading.Timer(
@@ -861,20 +910,31 @@ class BankSet:
                 event_value=getattr(event, 'value', None)
             )
 
-            if delay <= 0:
+            if delay <= _IMMEDIATE_DELAY_S:
                 immediate.append(ev_out)
                 if self._debug:
                     print(f"  [seq] -> immediate: {ev_out}")
             else:
                 if self._debug:
                     print(f"  [seq] -> in {delay:.3f}s: {ev_out}")
-                def _emit(ev=ev_out):
-                    if self._active:
-                        self._output_fn(ev)
+                _desc = str(ev_out)
+                def _emit(ev=ev_out, desc=_desc):
+                    if not self._active:
+                        return
+                    t0 = time.monotonic()
+                    self._output_fn(ev)
+                    elapsed = time.monotonic() - t0
+                    if elapsed > 0.100:
+                        print(
+                            f"[{self.name}] WARNING: _output_fn took "
+                            f"{elapsed*1000:.0f}ms for delayed send: {desc}"
+                        )
+                _due = time.monotonic() + delay
                 t = threading.Timer(delay, _emit)
                 t.daemon = True
                 t.start()
                 self._timer_list.append(t)
+                self._delay_send_threads.append((t, _due, _desc))
 
         return immediate
 

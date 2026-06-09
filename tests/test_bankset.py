@@ -1791,3 +1791,130 @@ class TestEagerSingle:
         assert result == []                # suppressed; no eager fire
         fake_timer.active()[0].fire()
         assert out[0].ctrl == 10           # single fires from window timer
+
+
+# ---------------------------------------------------------------------------
+# Delayed-send threshold and leak detection
+# ---------------------------------------------------------------------------
+
+class TestDelayThreshold:
+    """Verify _IMMEDIATE_DELAY_S behaviour: zero and sub-threshold delays are
+    sent synchronously; above-threshold delays go through the timer path."""
+
+    def test_zero_delay_is_immediate(self):
+        """delay: 0 sends synchronously — no timer spawned."""
+        bs, out = make_bankset({"default": {
+            "PC5": [{"send": "CC10", "value": 1, "delay": 0.0}],
+        }})
+        result = bs.handle(make_pc(5))
+        assert len(result) == 1
+        assert result[0].ctrl == 10
+
+    def test_sub_threshold_delay_is_immediate(self, fake_timer):
+        """delay <= 0.001 (1 ms) sends synchronously — no timer spawned."""
+        bs, out = make_bankset({"default": {
+            "PC5": [{"send": "CC10", "value": 1, "delay": 0.001}],
+        }})
+        result = bs.handle(make_pc(5))
+        assert len(result) == 1
+        assert result[0].ctrl == 10
+        assert fake_timer.active() == []   # no timer was created
+
+    def test_just_above_threshold_uses_timer(self, fake_timer):
+        """delay: 0.002 (> 1 ms threshold) routes through the timer path."""
+        bs, out = make_bankset({"default": {
+            "PC5": [{"send": "CC10", "value": 1, "delay": 0.002}],
+        }})
+        result = bs.handle(make_pc(5))
+        assert result == []
+        assert len(fake_timer.active()) == 1
+        fake_timer.active()[0].fire()
+        assert out[0].ctrl == 10
+
+    def test_zero_delay_does_not_populate_delay_send_threads(self):
+        """Zero-delay sends must not add entries to _delay_send_threads."""
+        bs, out = make_bankset({"default": {
+            "PC5": [{"send": "CC10", "value": 1, "delay": 0.0}],
+        }})
+        bs.handle(make_pc(5))
+        assert bs._delay_send_threads == []
+
+    def test_real_delay_populates_delay_send_threads(self, fake_timer):
+        """A real (above-threshold) delay adds a tracking entry."""
+        bs, out = make_bankset({"default": {
+            "PC5": [{"send": "CC10", "value": 1, "delay": 0.2}],
+        }})
+        bs.handle(make_pc(5))
+        assert len(bs._delay_send_threads) == 1
+        t, due_at, desc = bs._delay_send_threads[0]
+        assert t.is_alive()
+        assert "CC" in desc or "ctrl" in desc.lower()
+
+    def test_delay_send_thread_removed_after_fire(self, fake_timer):
+        """After a delayed timer fires, _delay_send_threads is cleaned up."""
+        bs, out = make_bankset({"default": {
+            "PC5": [{"send": "CC10", "value": 1, "delay": 0.2}],
+        }})
+        bs.handle(make_pc(5))
+        assert len(bs._delay_send_threads) == 1
+        fake_timer.active()[0].fire()
+        # Trigger cleanup (simulate timer_list > 50 isn't feasible; call directly)
+        bs._cleanup_timers()
+        assert bs._delay_send_threads == []
+
+    def test_cancel_timers_clears_delay_send_threads(self, fake_timer):
+        """cancel_timers() clears _delay_send_threads."""
+        bs, out = make_bankset({"default": {
+            "PC5": [{"send": "CC10", "value": 1, "delay": 0.2}],
+        }})
+        bs.handle(make_pc(5))
+        assert len(bs._delay_send_threads) == 1
+        bs.cancel_timers()
+        assert bs._delay_send_threads == []
+
+
+class TestDelayLeakDetection:
+    """Verify that _cleanup_timers warns once about stuck delay-send threads."""
+
+    def test_overdue_thread_prints_warning(self, fake_timer, capsys):
+        """A thread alive >1s past due gets a warning message."""
+        bs, out = make_bankset({"default": {
+            "PC5": [{"send": "CC10", "value": 1, "delay": 0.2}],
+        }})
+        bs.handle(make_pc(5))
+        assert len(bs._delay_send_threads) == 1
+
+        # Backdate due_at so it appears >1s overdue.
+        t, due_at, desc = bs._delay_send_threads[0]
+        bs._delay_send_threads[0] = (t, due_at - 2.0, desc)
+
+        bs._cleanup_timers()
+        captured = capsys.readouterr()
+        assert "WARNING" in captured.out
+        assert "stuck" in captured.out
+
+    def test_overdue_thread_warned_only_once(self, fake_timer, capsys):
+        """Second call to _cleanup_timers does not repeat the warning."""
+        bs, out = make_bankset({"default": {
+            "PC5": [{"send": "CC10", "value": 1, "delay": 0.2}],
+        }})
+        bs.handle(make_pc(5))
+        t, due_at, desc = bs._delay_send_threads[0]
+        bs._delay_send_threads[0] = (t, due_at - 2.0, desc)
+
+        bs._cleanup_timers()
+        capsys.readouterr()              # discard first warning
+        bs._cleanup_timers()
+        captured = capsys.readouterr()
+        assert "WARNING" not in captured.out  # no second warning
+
+    def test_completed_thread_not_warned(self, fake_timer, capsys):
+        """A thread that completed on time produces no warning."""
+        bs, out = make_bankset({"default": {
+            "PC5": [{"send": "CC10", "value": 1, "delay": 0.2}],
+        }})
+        bs.handle(make_pc(5))
+        fake_timer.active()[0].fire()    # thread completes
+        bs._cleanup_timers()
+        captured = capsys.readouterr()
+        assert "WARNING" not in captured.out

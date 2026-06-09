@@ -821,6 +821,24 @@ These can be overridden per-file or on the command line:
     Not a global constant -- specified per entry only.
     See `Gesture mappings`_ for the full tier syntax.
 
+``delay`` (sequence item key)
+    Seconds to wait before sending an item in a sequence.  Items with
+    ``"delay": 0`` or ``"delay": 0.001`` (at or below 1 ms) are sent
+    synchronously as if no delay were present — useful when testing a
+    config with different delay values without changing the format.
+    The smallest value that actually schedules a timer is **0.002** (2 ms).
+
+    Delayed sends run in a background thread.  If the JACK graph stalls
+    while a delayed send is pending, that thread may block silently in
+    ``_output_fn``.  The remapper detects this and prints a warning::
+
+        [actition] WARNING: delayed MIDI send stuck 3.2s past due —
+            _output_fn may be blocked (JACK graph stalled?): CtrlEvent(...)
+
+    The warning fires once per stuck thread, so repeated stalls each
+    produce exactly one line.  If the JACK graph recovers (e.g. the
+    blocking client is killed), the thread unblocks and completes normally.
+
 Bank display window
 -------------------
 
