@@ -762,7 +762,7 @@ Each output in a sequence is a dict with the following keys:
     on the first press, then lets ``"long"``, ``"double"``, ``"triple"``, and
     ``"repeat"`` resolve normally.  Eliminates the latency that ``"long"`` or
     ``"double"`` would otherwise impose on the ``"single"`` action.  See
-    `Gesture mappings`_ for usage examples and constraints.
+    `Mapping types`_ for usage examples and constraints.
 
 Trigger value filtering
 -----------------------
@@ -819,7 +819,7 @@ These can be overridden per-file or on the command line:
 ``repeat_accel``
     Optional list of acceleration tiers for ``"repeat"`` gestures.
     Not a global constant -- specified per entry only.
-    See `Gesture mappings`_ for the full tier syntax.
+    See `Mapping types`_ for the full tier syntax.
 
 ``delay`` (sequence item key)
     Seconds to wait before sending an item in a sequence.  Items with
