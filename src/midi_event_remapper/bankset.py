@@ -211,6 +211,22 @@ class BankSet:
         self._delay_send_threads = []
         # Thread ids already warned about; cleared when the thread completes.
         self._stuck_delay_ids    = set()
+
+        # Per-thread tracking for JACK_TRANSPORT calls: (thread, started_at,
+        # desc).  Mirrors _delay_send_threads above, but tracks a running
+        # call rather than a scheduled-but-not-yet-fired one: the entry is
+        # recorded the instant the daemon thread starts, and _cleanup_timers
+        # checks whether it's still alive well past a reasonable duration
+        # for a local jack.Client call.  A stuck entry here means the thread
+        # is parked inside jack_ctrl.transport_*(), most likely because the
+        # JACK graph itself has stalled (e.g. another client wedged in its
+        # process callback).  This does not detect a hang while it starts --
+        # only a periodic check (driven by handle()) notices it after the
+        # fact -- but it requires no new thread, lock, or change to how
+        # transport calls are dispatched.
+        self._transport_threads  = []
+        self._stuck_transport_ids = set()
+
         # Timestamp of last leak check; drives the time-based cleanup trigger.
         self._last_leak_check    = 0.0
 
@@ -254,6 +270,13 @@ class BankSet:
         self._timer_list.clear()
         self._delay_send_threads.clear()
         self._stuck_delay_ids.clear()
+        # Note: these are plain threading.Thread, not Timer -- there is no
+        # .cancel() for a call already in flight.  Clearing the tracking
+        # lists only stops *watching* a stuck thread; if one is genuinely
+        # parked inside jack_ctrl.transport_*(), it remains running (as a
+        # daemon thread) until the call returns or the process exits.
+        self._transport_threads.clear()
+        self._stuck_transport_ids.clear()
 
     @property
     def current_bank(self):
@@ -303,10 +326,10 @@ class BankSet:
             print(f"[BankSet:{self.name}] handle key={key}")
 
         # Periodically remove dead timers to prevent unbounded growth, and
-        # check for delay-send threads that may be stuck in _output_fn.
+        # check for delay-send or transport threads that may be stuck.
         if len(self._timer_list) > 50:
             self._cleanup_timers()
-        elif self._delay_send_threads:
+        elif self._delay_send_threads or self._transport_threads:
             _now = time.monotonic()
             if _now - self._last_leak_check > 5.0:
                 self._last_leak_check = _now
@@ -731,19 +754,32 @@ class BankSet:
     # ------------------------------------------------------------------
 
     def _cleanup_timers(self):
-        """Remove completed timers and warn about hung delay-send threads.
+        """Remove completed timers and warn about hung delay-send or
+        JACK_TRANSPORT threads.
 
         Each chord window, gesture timer, and delayed send creates a
         threading.Timer (which is a thread).  Without cleanup, the list
         grows indefinitely with dead threads, eventually causing hangs.
         Called from handle() when the list exceeds 50 entries OR when
-        delay-send threads are pending and 5 seconds have elapsed since
-        the last check.
+        delay-send / transport threads are pending and 5 seconds have
+        elapsed since the last check.
 
-        Hung detection: a delay-send thread that is still alive more than
-        1 second past its scheduled fire time is probably blocked inside
-        _output_fn waiting on a stalled JACK graph.  A warning is printed
-        once per thread (not on every subsequent check).
+        Hung detection (delay sends): a delay-send thread that is still
+        alive more than 1 second past its scheduled fire time is probably
+        blocked inside _output_fn waiting on a stalled JACK graph.
+
+        Hung detection (JACK_TRANSPORT): a transport thread that has been
+        running for more than 1 second is probably blocked inside
+        jack_ctrl.transport_*() -- a local JACK client call ordinarily
+        returns in well under that.  The likely cause is the JACK graph
+        itself having stalled (e.g. another client stuck in its own
+        process callback), not anything internal to this thread.
+
+        Both warnings print once per thread, not on every subsequent check.
+        Note: this only reports a hang *after* a check happens to run while
+        the thread is still stuck -- it cannot detect one the instant it
+        starts, and it stops watching a thread once cancel_timers() clears
+        the tracking list (e.g. on a config reload).
         """
         now = time.monotonic()
         self._timer_list = [t for t in self._timer_list if t.is_alive()]
@@ -764,6 +800,22 @@ class BankSet:
                 # Thread completed normally; retire its warned-id if present.
                 self._stuck_delay_ids.discard(id(t))
         self._delay_send_threads = live
+
+        live_transport = []
+        for t, started_at, desc in self._transport_threads:
+            if t.is_alive():
+                running_for = now - started_at
+                if running_for > 1.0 and id(t) not in self._stuck_transport_ids:
+                    self._stuck_transport_ids.add(id(t))
+                    print(
+                        f"[{self.name}] WARNING: JACK transport call stuck "
+                        f"{running_for:.1f}s — jack.Client call may be "
+                        f"blocked (JACK graph stalled?): {desc}"
+                    )
+                live_transport.append((t, started_at, desc))
+            else:
+                self._stuck_transport_ids.discard(id(t))
+        self._transport_threads = live_transport
 
     def _build_lookup_tables(self):
         for bank_name, bank in self.banks.items():
@@ -984,6 +1036,10 @@ class BankSet:
         are not disturbed.
 
         Safe to call from both the mididings callback and timer threads.
+
+        The thread is recorded in ``self._transport_threads`` so that
+        ``_cleanup_timers`` can later notice if it never returns (see that
+        method's docstring for what triggers a warning).
         """
         def run():
             try:
@@ -1003,6 +1059,7 @@ class BankSet:
 
         t = threading.Thread(target=run, daemon=True)
         t.start()
+        self._transport_threads.append((t, time.monotonic(), transport_str))
 
     def _run_osc_send(self, item):
         """Send an OSC message via the persistent client pool.

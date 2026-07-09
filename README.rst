@@ -839,6 +839,26 @@ These can be overridden per-file or on the command line:
     produce exactly one line.  If the JACK graph recovers (e.g. the
     blocking client is killed), the thread unblocks and completes normally.
 
+``JACK_TRANSPORT`` (send type)
+    ``start``, ``stop``, and ``locate <frame>`` also run in a background
+    thread (so they never block the mididings callback), and are watched
+    by the same stuck-thread detection as delayed sends above.  A local
+    JACK client call ordinarily returns in well under a second; if one is
+    still running past that, it is almost certainly parked inside the
+    JACK client library waiting on a stalled graph (e.g. another client
+    wedged in its own process callback -- an LV2 plugin state save on
+    transport relocate is one known trigger)::
+
+        [actition] WARNING: JACK transport call stuck 2.1s —
+            jack.Client call may be blocked (JACK graph stalled?): locate 0
+
+    Like the delay-send warning, this fires once per stuck thread. It
+    only reports a hang after a periodic check happens to run while the
+    thread is still stuck -- it cannot detect the instant a call starts
+    blocking, and it stops watching a given call once ``cancel_timers()``
+    runs (e.g. on a hot config reload), since the tracking list is
+    cleared along with everything else at that point.
+
 Bank display window
 -------------------
 

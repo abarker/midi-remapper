@@ -1207,6 +1207,93 @@ class TestJackTransportSend:
 
 
 # ---------------------------------------------------------------------------
+# JACK_TRANSPORT stuck-thread detection
+# ---------------------------------------------------------------------------
+
+class TestTransportLeakDetection:
+    """Verify _cleanup_timers detects a JACK_TRANSPORT thread that never
+    returns, mirroring TestDelayLeakDetection for delay-send threads.
+
+    _run_jack_transport spawns a plain threading.Thread (not a
+    fake_timer-backed threading.Timer, since transport calls run
+    immediately rather than after a scheduled delay), so these tests use
+    a real thread blocked on a threading.Event to represent "still
+    running", then backdate its recorded start time so the 1s threshold
+    is crossed without an actual multi-second sleep in the test suite.
+    """
+
+    def test_overdue_transport_thread_prints_warning(self, capsys):
+        import threading
+        bs, out = make_bankset({"default": {}})
+        block = threading.Event()
+        t = threading.Thread(target=block.wait, daemon=True)
+        t.start()
+        # Backdate the recorded start time so it looks like this call has
+        # been running for 2s, without actually waiting 2s in the test.
+        bs._transport_threads.append((t, time.monotonic() - 2.0, "locate 0"))
+        bs._cleanup_timers()
+        captured = capsys.readouterr()
+        assert "WARNING" in captured.out
+        assert "JACK transport call stuck" in captured.out
+        block.set()
+        t.join(timeout=1)
+
+    def test_overdue_transport_thread_warned_only_once(self, capsys):
+        import threading
+        bs, out = make_bankset({"default": {}})
+        block = threading.Event()
+        t = threading.Thread(target=block.wait, daemon=True)
+        t.start()
+        bs._transport_threads.append((t, time.monotonic() - 2.0, "locate 0"))
+        bs._cleanup_timers()
+        capsys.readouterr()              # discard first warning
+        bs._cleanup_timers()
+        captured = capsys.readouterr()
+        assert "WARNING" not in captured.out   # no second warning
+        block.set()
+        t.join(timeout=1)
+
+    def test_completed_transport_thread_not_warned(self, capsys):
+        import threading
+        bs, out = make_bankset({"default": {}})
+        t = threading.Thread(target=lambda: None, daemon=True)
+        t.start()
+        t.join(timeout=1)   # ensure it has already finished
+        bs._transport_threads.append((t, time.monotonic(), "locate 0"))
+        bs._cleanup_timers()
+        captured = capsys.readouterr()
+        assert "WARNING" not in captured.out
+        assert bs._transport_threads == []   # dead thread was removed
+
+    def test_cancel_timers_clears_transport_threads(self):
+        import threading
+        bs, out = make_bankset({"default": {}})
+        block = threading.Event()
+        t = threading.Thread(target=block.wait, daemon=True)
+        t.start()
+        bs._transport_threads.append((t, time.monotonic(), "locate 0"))
+        bs.cancel_timers()
+        assert bs._transport_threads == []
+        block.set()
+        t.join(timeout=1)
+
+    def test_real_transport_call_is_tracked_and_cleaned_up(
+        self, fake_timer, mock_jack_ctrl
+    ):
+        """_run_jack_transport records the real thread it spawns, and
+        _cleanup_timers drops it once the (fast, mocked) call completes."""
+        import time as _time
+        bs, out = make_bankset({"default": {
+            "PC5": [{"send": "JACK_TRANSPORT", "transport": "locate 0"}],
+        }})
+        bs.handle(make_pc(5))
+        _time.sleep(0.05)     # let the real daemon thread finish
+        bs._cleanup_timers()
+        assert bs._transport_threads == []
+        assert ("locate", 0) in mock_jack_ctrl.calls
+
+
+# ---------------------------------------------------------------------------
 # repeat_accel: accelerating repeat
 # ---------------------------------------------------------------------------
 
