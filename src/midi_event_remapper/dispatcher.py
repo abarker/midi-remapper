@@ -7,6 +7,7 @@ suite.
 """
 import subprocess
 import sys
+import time
 
 from mididings import config as mididings_config, run as mididings_run, \
     Process, Output
@@ -104,7 +105,16 @@ def main_handler(event):
     is gated on the per-BankSet ``bs._debug`` flag and is independent.
     """
     if config.DEBUG:
-        print(f"\n[in] channel={event.channel} type={event.type} {event}")
+        # Wall-clock stamp so a frozen session can be lined up against
+        # 'dmesg -T' / 'journalctl -k'.  This is the datum a freeze turns
+        # on: when the last MIDI event actually arrived.  Every other log
+        # line is downstream of this one by milliseconds, so stamping here
+        # is enough to bracket the stall.  Cost is marginal next to the
+        # {event} repr this line already builds, and it is gated on DEBUG.
+        _t = time.time()
+        print(f"\n[in] {time.strftime('%H:%M:%S', time.localtime(_t))}"
+              f".{int((_t % 1) * 1000):03d} "
+              f"channel={event.channel} type={event.type} {event}")
 
     try:
         for bankset in config.BANK_SETS:

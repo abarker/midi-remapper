@@ -24,6 +24,21 @@ from midi_event_remapper.midi import build_event, event_key, is_release
 _IMMEDIATE_DELAY_S = 0.001
 
 
+def _wall_clock():
+    """Return the current local wall-clock time as 'HH:MM:SS.mmm'.
+
+    Used only by the stuck-thread and overrun warnings below, so that a
+    stall can be lined up against 'dmesg -T' / 'journalctl -k' and against
+    the timestamped '[in]' lines from dispatcher.py.  Those warnings fire
+    rarely, so the formatting cost does not matter here -- do not call
+    this from the event hot path, which under --jack-rt runs inside the
+    JACK process callback.
+    """
+    t = time.time()
+    return "%s.%03d" % (time.strftime("%H:%M:%S", time.localtime(t)),
+                        int((t % 1) * 1000))
+
+
 def _entry_sequences(value):
     """Yield every sequence list from a raw bank entry value.
 
@@ -791,7 +806,8 @@ class BankSet:
                 if overdue > 1.0 and id(t) not in self._stuck_delay_ids:
                     self._stuck_delay_ids.add(id(t))
                     print(
-                        f"[{self.name}] WARNING: delayed MIDI send stuck "
+                        f"[{self.name}] {_wall_clock()} WARNING: "
+                        f"delayed MIDI send stuck "
                         f"{overdue:.1f}s past due — _output_fn may be "
                         f"blocked (JACK graph stalled?): {desc}"
                     )
@@ -808,7 +824,8 @@ class BankSet:
                 if running_for > 1.0 and id(t) not in self._stuck_transport_ids:
                     self._stuck_transport_ids.add(id(t))
                     print(
-                        f"[{self.name}] WARNING: JACK transport call stuck "
+                        f"[{self.name}] {_wall_clock()} WARNING: "
+                        f"JACK transport call stuck "
                         f"{running_for:.1f}s — jack.Client call may be "
                         f"blocked (JACK graph stalled?): {desc}"
                     )
@@ -978,7 +995,8 @@ class BankSet:
                     elapsed = time.monotonic() - t0
                     if elapsed > 0.100:
                         print(
-                            f"[{self.name}] WARNING: _output_fn took "
+                            f"[{self.name}] {_wall_clock()} WARNING: "
+                            f"_output_fn took "
                             f"{elapsed*1000:.0f}ms for delayed send: {desc}"
                         )
                 _due = time.monotonic() + delay
