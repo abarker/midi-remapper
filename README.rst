@@ -307,6 +307,29 @@ suppress the release::
     "CC0": [{"send": "CC10", "press_only": True}],    # press only
     "CC0": [{"send": "CC10", "value": 127}],          # always sends 127
 
+.. note::
+
+   **Gesture entries never emit a release message** -- unlike the direct
+   form above.  The source key's release is consumed; nothing mirroring
+   the key going up is ever sent.  Every output comes from a labelled
+   sequence (``single``, ``long``, ``double``, ``triple``, ``repeat``),
+   carrying that sequence's own value.
+
+   Output may still be *triggered* by the release -- with ``single`` +
+   ``long``, the single fires on quick release -- but what goes out is the
+   single's sequence, not a release.
+
+   The consumption holds even when ``single`` is the *only* label, which
+   is easy to assume otherwise since that case fires immediately on press
+   exactly as a direct mapping does.  It still sends nothing when the key
+   is let go.  Consequently ``press_only`` has no purpose inside a gesture
+   entry.
+
+   It matters downstream: a device expecting a momentary press-and-release
+   pair sees only the press.  If a receiver treats the release as "end this
+   command", bind it so that zero-valued messages are ignored, or the
+   command will be started and never ended.
+
 Multiple outputs per event::
 
     "PC5": [
