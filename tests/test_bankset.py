@@ -2005,3 +2005,92 @@ class TestDelayLeakDetection:
         bs._cleanup_timers()
         captured = capsys.readouterr()
         assert "WARNING" not in captured.out
+
+
+# ---------------------------------------------------------------------------
+# Send errors are reported even with debug off
+# ---------------------------------------------------------------------------
+
+class TestSendErrorsNotGatedOnDebug:
+    """CMD / JACK_TRANSPORT / OSC failures used to be printed only when
+    self._debug was set, so a failing send was silent in normal operation.
+    They now go through urgent_print unconditionally.  Each runs in a
+    spawned thread, hence the settle sleep."""
+
+    SETTLE = 0.05
+
+    def test_cmd_error_reported_without_debug(self, monkeypatch, capsys):
+        import subprocess
+
+        def _boom(*args, **kwargs):
+            raise OSError("cmd exploded")
+
+        monkeypatch.setattr(subprocess, "run", _boom)
+        bs, _ = make_bankset({"default": {
+            "PC5": [{"send": "CMD", "cmd": "true"}],
+        }})
+        bs._debug = False
+        bs.handle(make_pc(5))
+        time.sleep(self.SETTLE)
+
+        captured = capsys.readouterr()
+        assert "[cmd] ERROR" in captured.out
+        assert "cmd exploded" in captured.out
+
+    def test_jack_transport_error_reported_without_debug(
+            self, monkeypatch, capsys):
+        from midi_event_remapper import jack_ctrl
+
+        def _boom(*args, **kwargs):
+            raise RuntimeError("no jack")
+
+        monkeypatch.setattr(jack_ctrl, "transport_locate", _boom)
+        bs, _ = make_bankset({"default": {
+            "PC5": [{"send": "JACK_TRANSPORT", "transport": "locate 0"}],
+        }})
+        bs._debug = False
+        bs.handle(make_pc(5))
+        time.sleep(self.SETTLE)
+
+        captured = capsys.readouterr()
+        assert "[jack_transport] ERROR" in captured.out
+        assert "no jack" in captured.out
+
+    def test_osc_error_reported_without_debug(self, monkeypatch, capsys):
+        from midi_event_remapper import osc_ctrl
+
+        def _boom(*args, **kwargs):
+            raise RuntimeError("osc exploded")
+
+        monkeypatch.setattr(osc_ctrl, "send", _boom)
+        bs, _ = make_bankset({"default": {
+            "PC5": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+                     "address": "/test"}],
+        }})
+        bs._debug = False
+        bs.handle(make_pc(5))
+        time.sleep(self.SETTLE)
+
+        captured = capsys.readouterr()
+        assert "[osc] ERROR" in captured.out
+        assert "osc exploded" in captured.out
+
+    def test_send_errors_also_reach_stderr(self, monkeypatch, capsys):
+        """urgent_print duplicates to stderr so the console sees faults
+        even when stdout is redirected to the session log."""
+        from midi_event_remapper import osc_ctrl
+
+        def _boom(*args, **kwargs):
+            raise RuntimeError("osc exploded")
+
+        monkeypatch.setattr(osc_ctrl, "send", _boom)
+        bs, _ = make_bankset({"default": {
+            "PC5": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+                     "address": "/test"}],
+        }})
+        bs._debug = False
+        bs.handle(make_pc(5))
+        time.sleep(self.SETTLE)
+
+        captured = capsys.readouterr()
+        assert "[osc] ERROR" in captured.err
