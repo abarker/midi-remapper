@@ -315,9 +315,12 @@ suppress the release::
    sequence (``single``, ``long``, ``double``, ``triple``, ``repeat``),
    carrying that sequence's own value.
 
-   Output may still be *triggered* by the release -- with ``single`` +
-   ``long``, the single fires on quick release -- but what goes out is the
-   single's sequence, not a release.
+   Output may still be *triggered* by the release.  With ``single`` +
+   ``long``, the single fires on release **only when the key was let go
+   before ``long_ms``**; released after that threshold, the long fires
+   instead (normally already dispatched by its timer).  Either way what
+   goes out is that label's sequence -- which may contain any number of
+   sends, of any type -- and never a release.
 
    The consumption holds even when ``single`` is the *only* label, which
    is easy to assume otherwise since that case fires immediately on press
