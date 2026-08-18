@@ -503,18 +503,19 @@ The command runs in a background thread and does not block the MIDI
 handler.  stdout and stderr are printed when ``--debug`` is active::
 
     # Single command
-    "CC3": [{"send": "CMD", "cmd": "jack_transport start"}],
+    "CC3": [{"send": "CMD",
+             "cmd": "jack_connect system:capture_1 sooperlooper:common_in_1"}],
 
     # Combined with MIDI output
     "CC3": [
         {"send": "CC10", "value": 127},
-        {"send": "CMD",  "cmd": "jack_transport start"},
+        {"send": "CMD",  "cmd": "notify-send 'Take armed'"},
     ],
 
     # On a long press
     "CC3": {
-        "single": [{"send": "CMD", "cmd": "jack_transport stop"}],
-        "long":   [{"send": "CMD", "cmd": "jack_transport locate 0"}],
+        "single": [{"send": "CMD", "cmd": "amixer -q set Master 5%+"}],
+        "long":   [{"send": "CMD", "cmd": "$HOME/bin/next-song.sh"}],
     },
 
     # Chord that switches bank AND runs a command
@@ -528,12 +529,30 @@ handler.  stdout and stderr are printed when ``--debug`` is active::
 Commands run via the shell (``shell=True``), so pipes, redirects, and
 environment variables all work.  Some useful examples::
 
-    jack_transport start
-    jack_transport stop
-    jack_transport locate 0   # prefer JACK_TRANSPORT for this -- see below
+    jack_connect system:capture_1 sooperlooper:common_in_1
+    jack_disconnect system:capture_1 sooperlooper:common_in_1
     aconnect 14:0 128:0
+    amixer -q set Master 5%+
     echo 120 > /tmp/bpm.txt
     notify-send "Bank: drums"
+
+.. warning::
+
+   **Some tools take their commands on stdin, not as arguments.**
+   ``jack_transport`` is one: it is a command interpreter, so
+   ``jack_transport locate 0`` fails (an error appears on stderr, which
+   ``CMD`` shows in debug output).  Pipe the command in instead::
+
+       echo 'locate 0' | jack_transport
+
+   For transport control specifically, ``JACK_TRANSPORT`` (next section)
+   is better still: no subprocess at all.
+
+   Related caution: ``CMD`` does not redirect stdin, so a command that
+   *blocks* waiting for input would hang indefinitely, leaking a
+   subprocess and a thread per trigger with nothing to report it.  Redirect
+   explicitly (``</dev/null`` or a pipe) for anything that might read
+   stdin.
 
 JACK transport control
 ----------------------

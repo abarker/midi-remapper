@@ -398,19 +398,33 @@
             # For JACK transport operations (start, stop, locate), prefer
             # JACK_TRANSPORT below -- it avoids subprocess overhead that
             # can cause xruns in recording clients.
+            #
+            # NOTE: some tools take their commands on stdin, not as
+            # arguments.  `jack_transport` is a command interpreter, so
+            # "jack_transport locate 0" fails with an error on stderr
+            # (CMD shows it in debug output).  Pipe instead:
+            #     echo 'locate 0' | jack_transport
+            # For transport control, JACK_TRANSPORT is better still --
+            # no subprocess at all.
+            #
+            # Related caution: CMD does not redirect stdin, so a command
+            # that *blocks* on input would hang indefinitely, leaking a
+            # subprocess and thread per trigger with nothing to report it.
+            # Redirect explicitly (</dev/null or a pipe) if in doubt.
 
-            # "CC5": [{"send": "CMD", "cmd": "jack_transport start"}],
+            # "CC5": [{"send": "CMD",
+            #          "cmd": "jack_connect system:capture_1 looper:in_1"}],
 
             # CMD combined with MIDI output.
             # "CC5": [
             #     {"send": "CC50", "value": 127},
-            #     {"send": "CMD",  "cmd": "jack_transport start"},
+            #     {"send": "CMD",  "cmd": "notify-send 'Take armed'"},
             # ],
 
             # CMD on a gesture.
             # "CC5": {
-            #     "single": [{"send": "CMD", "cmd": "jack_transport stop"}],
-            #     "long":   [{"send": "CMD", "cmd": "jack_transport locate 0"}],
+            #     "single": [{"send": "CMD", "cmd": "amixer -q set Master 5%+"}],
+            #     "long":   [{"send": "CMD", "cmd": "$HOME/bin/next-song.sh"}],
             # },
 
             # CMD on a chord.
