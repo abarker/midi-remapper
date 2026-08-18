@@ -16,6 +16,8 @@ import threading
 import time
 from pathlib import Path
 
+from midi_event_remapper.config import urgent_print
+
 RETRY_DELAY_S = 0.2   # Seconds to wait before retrying a failed parse.
 POLL_INTERVAL = 1.0   # Default poll interval in seconds.
 
@@ -93,7 +95,7 @@ class ConfigReloader:
                     self._reload(changed)
             except Exception as e:
                 # Never let an unexpected error kill the reloader thread.
-                print(f"[reload] ERROR in watcher: {e}")
+                urgent_print(f"[reload] ERROR in watcher: {e}")
 
     # ------------------------------------------------------------------
     # Reload logic
@@ -104,7 +106,7 @@ class ConfigReloader:
         from midi_event_remapper.loader import load_bankset_file
 
         changed_names = ", ".join(p.name for p in changed_paths)
-        print(f"\n[reload] {changed_names} changed, reloading...")
+        urgent_print(f"\n[reload] {changed_names} changed, reloading...")
 
         load_result = self._try_load_all(load_bankset_file)
         if load_result is None:
@@ -116,11 +118,11 @@ class ConfigReloader:
             errs, warns = bs.validate()
             errors.extend(errs)
             for w in warns:
-                print(f"[reload] warning: {w}")
+                urgent_print(f"[reload] warning: {w}")
         if errors:
-            print("[reload] config errors -- keeping current config")
+            urgent_print("[reload] config errors -- keeping current config")
             for e in errors:
-                print(f"  x {e}")
+                urgent_print(f"  x {e}")
             return
 
         self._transfer_state(new_banksets)
@@ -150,8 +152,8 @@ class ConfigReloader:
         preserved = [
             f"{bs.name}={bs.active_bank}" for bs in new_banksets
         ]
-        print(f"[reload] {changed_names}: OK  "
-              f"(active banks: {', '.join(preserved)})")
+        urgent_print(f"[reload] {changed_names}: OK  "
+                     f"(active banks: {', '.join(preserved)})")
 
     def _refresh_display(self, new_banksets):
         """Push one display update for the bankset currently being shown.
@@ -206,8 +208,8 @@ class ConfigReloader:
                               f"{RETRY_DELAY_S*1000:.0f}ms...")
                     time.sleep(RETRY_DELAY_S)
                 else:
-                    print("[reload] parse error -- keeping current config")
-                    print(f"  {e}")
+                    urgent_print("[reload] parse error -- keeping current config")
+                    urgent_print(f"  {e}")
                     return None
 
     def _transfer_state(self, new_banksets):

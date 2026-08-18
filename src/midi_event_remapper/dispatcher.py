@@ -126,7 +126,7 @@ def main_handler(event):
                     )
                 return result
     except Exception as e:
-        print(f"[handler] ERROR: {e}")
+        config.urgent_print(f"[handler] ERROR: {e}")
 
     return event   # pass through unchanged (also the safe fallback on error)
 

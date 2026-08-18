@@ -207,6 +207,7 @@ Each sequence is a list of dicts.  Required key: "send".
 Note: using "velocity" on a CC send or "value" on a NOTE send is caught
 by validate() at startup.
 """
+import sys
 
 # --------------------------------------------------------------------------
 # JACK / mididings connection settings
@@ -252,3 +253,33 @@ DEBUG = False
 # BankSets loaded from config files.  Replaced atomically by the reloader
 # on each successful hot reload.  Empty until cli.py loads the config files.
 BANK_SETS = []
+
+
+# --------------------------------------------------------------------------
+# Output helper
+# --------------------------------------------------------------------------
+
+def urgent_print(msg):
+    """Print a message that must be seen at once, not when the buffer fills.
+
+    Writes to **both** streams:
+
+    * stdout -- the session log when output is redirected, flushed so the
+      log keeps its chronological order and stays complete.
+    * stderr -- reaches the console, and Python keeps stderr line buffered
+      even when it is not a tty, so it appears immediately.
+
+    Redirecting stdout to a file makes Python block buffer it (8 KB), which
+    is what keeps ordinary tracing off the syscall path in the ``--jack-rt``
+    callback.  The cost is that a message can sit unwritten for a long time
+    -- and with debug off the log is quiet enough that a rejected config
+    reload could stay invisible for days.  This routine is the exception
+    for the messages where that is unacceptable.
+
+    Use for faults and reload results only.  High-volume tracing must keep
+    plain ``print``.  Calls from the RT callback are acceptable because the
+    sites that use it fire only when something has already gone wrong, so
+    the flush is never paid during normal operation.
+    """
+    print(msg, flush=True)
+    print(msg, file=sys.stderr)

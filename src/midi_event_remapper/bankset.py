@@ -14,6 +14,7 @@ import threading
 import time
 
 from midi_event_remapper.midi import build_event, event_key, is_release
+from midi_event_remapper.config import urgent_print
 
 # Delays at or below this threshold are sent synchronously rather than
 # spawning a threading.Timer.  Any delay <= 1 ms is musically meaningless
@@ -805,7 +806,7 @@ class BankSet:
                 overdue = now - due_at
                 if overdue > 1.0 and id(t) not in self._stuck_delay_ids:
                     self._stuck_delay_ids.add(id(t))
-                    print(
+                    urgent_print(
                         f"[{self.name}] {_wall_clock()} WARNING: "
                         f"delayed MIDI send stuck "
                         f"{overdue:.1f}s past due — _output_fn may be "
@@ -823,7 +824,7 @@ class BankSet:
                 running_for = now - started_at
                 if running_for > 1.0 and id(t) not in self._stuck_transport_ids:
                     self._stuck_transport_ids.add(id(t))
-                    print(
+                    urgent_print(
                         f"[{self.name}] {_wall_clock()} WARNING: "
                         f"JACK transport call stuck "
                         f"{running_for:.1f}s — jack.Client call may be "
@@ -994,7 +995,7 @@ class BankSet:
                     self._output_fn(ev)
                     elapsed = time.monotonic() - t0
                     if elapsed > 0.100:
-                        print(
+                        urgent_print(
                             f"[{self.name}] {_wall_clock()} WARNING: "
                             f"_output_fn took "
                             f"{elapsed*1000:.0f}ms for delayed send: {desc}"
@@ -1037,8 +1038,9 @@ class BankSet:
                     if result.returncode != 0:
                         print(f"  [cmd] exit code: {result.returncode}")
             except Exception as e:
-                if self._debug:
-                    print(f"  [cmd] ERROR running {cmd!r}: {e}")
+                # Not gated on debug: a failed command must not be silent
+                # merely because tracing is off.
+                urgent_print(f"  [cmd] ERROR running {cmd!r}: {e}")
 
         t = threading.Thread(target=run, daemon=True)
         t.start()
@@ -1072,8 +1074,8 @@ class BankSet:
                 if self._debug:
                     print(f"  [jack_transport] {transport_str}")
             except Exception as e:
-                if self._debug:
-                    print(f"  [jack_transport] ERROR: {e}")
+                # Not gated on debug: see _run_cmd.
+                urgent_print(f"  [jack_transport] ERROR: {e}")
 
         t = threading.Thread(target=run, daemon=True)
         t.start()
@@ -1108,8 +1110,8 @@ class BankSet:
                     "Install it with: pip install python-osc"
                 )
             except Exception as e:
-                if self._debug:
-                    print(f"  [osc] ERROR: {e}")
+                # Not gated on debug: see _run_cmd.
+                urgent_print(f"  [osc] ERROR: {e}")
 
         t = threading.Thread(target=run, daemon=True)
         t.start()
