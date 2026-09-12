@@ -18,8 +18,8 @@ Installation
 
 The package is not on PyPI.  Clone the repository first::
 
-    git clone https://github.com/abarker/midi-event-remapper.git
-    cd midi-event-remapper
+    git clone https://github.com/abarker/midiremapper.git
+    cd midiremapper
 
 Then choose one of the four install options below.
 
@@ -1048,8 +1048,8 @@ Development
 
 Clone and install in editable mode::
 
-    git clone https://github.com/abarker/midi-event-remapper.git
-    cd midi-event-remapper
+    git clone https://github.com/abarker/midiremapper.git
+    cd midiremapper
     pip install -e ".[dev]"
     pytest
 
