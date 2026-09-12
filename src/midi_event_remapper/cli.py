@@ -48,6 +48,7 @@ Override the JACK client name (e.g. when running two instances):
     midi-remapper actition.py --client-name midi_remapper_2
 """
 import argparse
+import signal
 import sys
 from pathlib import Path
 
@@ -443,6 +444,36 @@ def main():
             print(f"[startup] GC frozen: {frozen} objects in permanent "
                   f"generation, runtime tracking still active.")
 
+    # stdout is block-buffered when it is a file rather than a tty, which is
+    # how start.py runs us (see its MIDI_REMAPPER_LOG_FILENAME comment: the
+    # print() calls below run inside the JACK process callback under
+    # --jack-rt, so per-line writes would cause xruns).  The default SIGTERM
+    # disposition terminates the process immediately, discarding up to a full
+    # 8 KB buffer -- often several minutes of events, and exactly the events
+    # wanted when diagnosing a freeze.  start.py shuts us down with
+    # Popen.terminate() (SIGTERM) and then wait()s, so handling the signal
+    # here converts that into a clean exit that flushes.
+    #
+    # This costs nothing during normal operation: it installs a disposition at
+    # startup and adds no per-event work, no syscalls, and no locking on the
+    # logging path.  The buffering strategy is unchanged.
+    #
+    # Raising SystemExit unwinds the main thread out of mididings'
+    # Engine.run(), which parks in `self._quit.wait(86400)` -- a long timeout
+    # chosen by mididings precisely so signals stay deliverable.  mididings
+    # catches only KeyboardInterrupt there, so SystemExit propagates through
+    # its on_exit hooks and then through the `finally` below.
+    #
+    # Only SIGTERM is covered.  SIGKILL and a hard crash still lose the
+    # buffer; bounding that would need a periodic flush from a non-RT thread,
+    # which would put the RT thread at risk of blocking on the BufferedWriter
+    # lock, so it is deliberately not done here.
+    def _flush_and_exit(signum, frame):
+        sys.stdout.flush()
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, _flush_and_exit)
+
     try:
         dispatcher.run()
     finally:
@@ -450,6 +481,9 @@ def main():
             reloader.stop()
         if display is not None:
             display.stop()
+        # Belt and braces: the handler above flushes before unwinding, but
+        # this also covers a normal return and the KeyboardInterrupt path.
+        sys.stdout.flush()
 
 
 if __name__ == "__main__":
