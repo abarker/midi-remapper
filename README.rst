@@ -1,11 +1,20 @@
 midi-event-remapper
 ===================
 
-A MIDI event remapper built on top of `mididings`_ and JACK.  It lets you
-map incoming MIDI events (CC, PC, Note) to different outgoing events, with
-support for chords, long press, double/triple press, toggles, and switchable
-mapping banks -- all configured in a simple data file with no programming
-required.
+A MIDI event remapper built on top of `mididings`_ and JACK.  It can remap
+essentially any incoming MIDI event (CC, PC, Note) to any outgoing event or
+sequence of events, with support for chords, long press, double/triple
+press, toggles, and switchable mapping banks -- all configured in a simple
+data file with no programming required.
+
+It is mainly intended for MIDI controllers such as footswitches, where it
+adds gestures -- double-click, long-press, hold-repeat, and more -- on top
+of hardware that only sends simple presses.  Long-press and hold-repeat
+need a *momentary* input: a press paired with its own release, so the
+remapper can measure how long the control was held.  Double- and
+triple-press need no release at all -- they only count a series of press
+events within a time window -- so they also work on event types that have
+no release signal, such as Program Change.
 
 .. _mididings: https://dsacre.github.io/mididings/doc/
 
@@ -123,6 +132,12 @@ Command-line reference
     up less screen space.  Right-click anywhere on the window to show a menu
     with **Exit** (quit the program) and **Cancel** (dismiss the menu).
 
+``--save-pos [FILE]``
+    Save the bank display window position on exit and restore it on the
+    next run (implies ``--display``).  With no argument, uses
+    ``~/.config/midi-remapper/display.pos``.  Pass an explicit path when
+    running multiple configs that need separate positions.
+
 ``--validate``, ``-V``
     Validate config files and exit without connecting to JACK.  Use this
     to check a new config before a live session.
@@ -218,6 +233,11 @@ Command-line reference
     over a pipe.  With a lean handler and a reasonable buffer size (e.g. 512
     samples) this mode is often workable in practice.  If no xruns are
     observed it is worth using.
+
+``--client-name NAME``
+    Override the JACK client name for this session (default: ``CLIENT_NAME``
+    in ``config.py``, ``"midi_remapper"``).  Useful when running multiple
+    instances simultaneously.  See also `JACK connection`_ below.
 
 Config files
 ------------
@@ -941,10 +961,10 @@ bank dict in the config file::
         },
     },
 
-All five keys are optional.  Any key omitted falls back to the defaults
-in ``bank_display.py`` (dark background, white text, 72-point font).
-``"_display"`` is stripped before MIDI mapping lookup and does not
-interfere with any event key.
+All five keys are optional.  Any key omitted falls back to its own
+default (dark background, white text, 72-point font).  ``"_display"`` is
+stripped before MIDI mapping lookup and does not interfere with any
+event key.
 
 Style changes take effect immediately on the next bank switch.  When the
 config file is reloaded live, the new styles are applied at once without
