@@ -16,7 +16,7 @@ triple-press need no release at all -- they only count a series of press
 events within a time window -- so they also work on event types that have
 no release signal, such as Program Change.
 
-.. _mididings: https://dsacre.github.io/mididings/doc/
+.. _mididings: https://github.com/mididings/mididings
 
 .. contents:: Contents
    :depth: 2
@@ -29,6 +29,12 @@ The package is not on PyPI.  Clone the repository first::
 
     git clone https://github.com/abarker/midiremapper.git
     cd midiremapper
+
+Installing into a virtual environment is recommended.  Create one inside
+the clone, or wherever you prefer, then activate it::
+
+    python3 -m venv .venv
+    source .venv/bin/activate
 
 Then choose one of the four install options below.
 
@@ -89,6 +95,13 @@ The ``[rt]`` extra installs Cython; ``[dev]`` adds pytest.  Re-run
 ``mididings``, ``JACK-Client``, ``python-osc``, and a running JACK
 server (via QjackCtl or ``jackd``).
 
+**Platform.**  Developed and tested on Ubuntu 24.04; other Linux
+distributions should work the same way.  The community-maintained
+``mididings`` fork this project depends on
+(https://github.com/mididings/mididings) also lists macOS as supported,
+although that has not currently been tested here; mididings does not
+support Windows.
+
 Quick start
 -----------
 
@@ -101,6 +114,27 @@ Quick start
 4. Connect your controller's JACK MIDI output to
    ``midi_remapper:in_0`` and ``midi_remapper:out_0`` to
    your target application, using QjackCtl's Graph or ``jack_connect``.
+
+Running without activating a venv
+-------------------------------------
+
+If you installed inside a venv, ``pip install -e .`` bakes that venv's
+own interpreter into the installed ``midi-remapper`` command as an
+absolute shebang, so it does not need to be activated to run correctly
+afterward -- it only needs a way for the shell to find it::
+
+    /path/to/venv/bin/midi-remapper mycontroller.py
+
+Use the full path (e.g. from a launcher script or cron job), a symlink to
+it on your ``PATH``, or add the venv's ``bin/`` directory to ``PATH``
+permanently.  That is different from typing the bare command name in an
+un-activated shell, which only works if the venv is already on ``PATH``
+some other way.
+
+``pipx install`` works the same way -- it also creates a dedicated venv
+per tool with an absolute-shebang console script -- with the added
+convenience that ``pipx ensurepath`` puts it on ``PATH`` for you
+automatically.
 
 Command-line reference
 ----------------------
@@ -206,16 +240,18 @@ Command-line reference
     - Chord multipress (``"double"`` / ``"triple"`` chord completions)
     - Delayed sends (``"delay": ...``)
 
-    **SooperLooper timestamp precision**
+    **Timing within the buffer**
 
-    ``jack-rt`` also preserves JACK MIDI intra-block timestamps
-    end-to-end.  A planned SooperLooper patch (``TriggerLatency =
-    buffersize - intra_block_offset``) would exploit these timestamps to
-    achieve exact loop-boundary alignment for synchronous events -- zero
-    net error regardless of where within the block the button was pressed.
-    This benefit requires both ``--jack-rt`` *and* the SooperLooper patch;
-    neither alone is sufficient.  Without the patch, ``--jack-rt`` does
-    not improve loop-boundary precision.
+    Both backends keep each event's position within the JACK buffer (its
+    sample offset): ``jack-rt`` sends it in the same period, the buffered
+    backend in the next period at the same offset.  A receiver that places
+    JACK MIDI events at their exact sample, such as the forked
+    SooperLooper's ``midi_in`` port, therefore gets exact placement with
+    either backend.  With ``jack-rt`` a command passed through the remapper
+    also arrives as early as it would with the controller connected
+    directly; with the buffered backend it arrives one period later.
+    Stock SooperLooper (ALSA MIDI only) starts commands at the beginning of
+    a buffer either way, but ``jack-rt`` still saves the period.
 
     Also calls ``sys.setswitchinterval(0.0001)`` to reduce the chance
     that the Python GIL is held by another thread when the JACK callback
@@ -233,6 +269,11 @@ Command-line reference
     over a pipe.  With a lean handler and a reasonable buffer size (e.g. 512
     samples) this mode is often workable in practice.  If no xruns are
     observed it is worth using.
+
+    **Watch for xruns after switching.**  Compare JACK's xrun count
+    (QjackCtl shows it) over a session or two with and without
+    ``--jack-rt``.  If it goes up, go back to the default backend, or try
+    the Cython extension (see `Optional Cython extension`_) and compare again.
 
 ``--client-name NAME``
     Override the JACK client name for this session (default: ``CLIENT_NAME``
@@ -743,6 +784,10 @@ Latency summary
 | Gesture single + repeat (single)  | On quick release if no       |
 |                                   | repeat has fired yet         |
 +-----------------------------------+------------------------------+
+
+The times are the remapper's own.  The default buffered backend adds one
+JACK period to each; ``--jack-rt`` removes that period for the entries
+that fire immediately (see ``--jack-rt`` above).
 
 Sequence item reference
 -----------------------

@@ -41,7 +41,7 @@ Remember the position in a specific file:
 Disable live config reloading:
     midi-remapper actition.py --no-reload
 
-Use jack-rt backend for intra-block timestamp precision (SooperLooper):
+Use the jack-rt backend (one JACK period less latency; watch for xruns):
     midi-remapper actition.py --jack-rt
 
 Override the JACK client name (e.g. when running two instances):
@@ -195,13 +195,16 @@ def build_parser():
         action  = "store_true",
         dest    = "jack_rt",
         help    = (
-            "Use the mididings jack-rt backend instead of the default jack "
-            "backend.  Runs the MIDI handler directly in the JACK process "
-            "callback, which preserves intra-block MIDI timestamps (useful "
-            "for SooperLooper loop-boundary precision).  WARNING: Python "
-            "code in the RT callback can cause xruns in other JACK clients. "
-            "Also calls sys.setswitchinterval(0.0001) to reduce GIL "
-            "contention."
+            "Use the mididings jack-rt backend instead of the default "
+            "buffered jack backend.  Runs the MIDI handler directly in the "
+            "JACK process callback, so mappings that fire immediately send "
+            "their output in the same JACK period instead of the next one: "
+            "one period less latency (e.g. 5.3 ms at 256 frames / 48 kHz).  "
+            "Both backends keep each event's sample offset within the "
+            "buffer.  WARNING: Python code in the RT callback can cause "
+            "xruns in all JACK clients; watch the xrun count after "
+            "switching, and go back to the default if it rises.  Also calls "
+            "sys.setswitchinterval(0.0001) to reduce GIL contention."
         ),
     )
 
