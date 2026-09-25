@@ -107,7 +107,7 @@ Quick start
 
 1. Start JACK (e.g. open QjackCtl and press Start).
 2. Create a config file ``mycontroller.py`` (see `Config files`_ below).
-3. Run::
+3. Run (with the venv active; see `Running without activating a venv`_)::
 
     midi-remapper mycontroller.py
 

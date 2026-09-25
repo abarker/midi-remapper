@@ -50,3 +50,6 @@ pip-delete-this-directory.txt
 # Cython output: generated C source and the compiled extension.
 src/midi_event_remapper/midi_core.c
 *.so
+
+# Claude Code local files.
+.claude/
