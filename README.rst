@@ -793,9 +793,9 @@ Latency summary
 +-----------------------------------+------------------------------+
 | Toggle                            | Immediately on press (~0ms)  |
 +-----------------------------------+------------------------------+
-| Chord (complete)                  | When the last key arrives    |
+| Chord (complete)                  | When last key arrives (~0ms) |
 +-----------------------------------+------------------------------+
-| Fast chord fallback               | On key release               |
+| Fast chord fallback               | On key release (~0ms)        |
 +-----------------------------------+------------------------------+
 | Standard chord fallback           | After chord_window_ms (80 ms)|
 +-----------------------------------+------------------------------+
