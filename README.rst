@@ -8,13 +8,13 @@ press, toggles, and switchable mapping banks -- all configured in a simple
 data file with no programming required.
 
 It is mainly intended for MIDI controllers such as footswitches, where it
-adds gestures -- double-click, long-press, hold-repeat, and more -- on top
-of hardware that only sends simple presses.  Long-press and hold-repeat
+adds gestures -- double press, long press, hold-repeat, and more -- on top
+of hardware that only sends simple presses.  Long press and hold-repeat
 need a *momentary* input: a press paired with its own release, so the
-remapper can measure how long the control was held.  Double- and
-triple-press need no release at all -- they only count a series of press
-events within a time window -- so they also work on event types that have
-no release signal, such as Program Change.
+remapper can measure how long the control was held.  Double and triple
+press need no release at all -- they only count presses within a time
+window -- so they also work on event types that have no release signal,
+such as Program Change.
 
 .. _mididings: https://github.com/mididings/mididings
 
@@ -105,8 +105,10 @@ The ``[rt]`` extra installs Cython; ``[dev]`` adds pytest.  Re-run
 
 **Dependencies**
 
-``mididings``, ``JACK-Client``, ``python-osc``, and a running JACK
-server (via QjackCtl or ``jackd``).
+``mididings``, ``JACK-Client`` and ``python-osc``, which pip installs; a
+running JACK server (via QjackCtl or ``jackd``); and, for the ``--display``
+window, ``tkinter`` (usually part of Python; ``python3-tk`` on
+Debian/Ubuntu).
 
 **Platform.**  Developed and tested on Ubuntu 24.04; other Linux
 distributions should work the same way.  The community-maintained
@@ -131,18 +133,17 @@ Quick start
 Running without activating a venv
 -------------------------------------
 
-If you installed inside a venv, ``pip install -e .`` bakes that venv's
-own interpreter into the installed ``midi-remapper`` command as an
-absolute shebang, so it does not need to be activated to run correctly
-afterward -- it only needs a way for the shell to find it::
+If you installed inside a venv, pip (with or without ``-e``) writes that
+venv's own interpreter into the installed ``midi-remapper`` command as an
+absolute shebang, so the venv does not need to be activated to run it
+afterward -- the shell only needs a way to find it::
 
     /path/to/venv/bin/midi-remapper mycontroller.py
 
-Use the full path (e.g. from a launcher script or cron job), a symlink to
-it on your ``PATH``, or add the venv's ``bin/`` directory to ``PATH``
-permanently.  That is different from typing the bare command name in an
-un-activated shell, which only works if the venv is already on ``PATH``
-some other way.
+Use the full path (e.g. from a launcher script), a symlink to it on your
+``PATH``, or add the venv's ``bin/`` directory to ``PATH`` permanently.
+Typing the bare command name in a shell without the venv active works only
+if one of those is in place.
 
 ``pipx install`` works the same way -- it also creates a dedicated venv
 per tool with an absolute-shebang console script -- with the added
@@ -171,7 +172,7 @@ Command-line reference
     Open a floating window that shows the current bank name in large text.
     The window stays on top of other windows and updates instantly on every
     bank switch.  Useful during live performance to confirm that a chord or
-    double-press registered.  Requires ``tkinter`` (standard library on most
+    double press registered.  Requires ``tkinter`` (standard library on most
     systems; install ``python3-tk`` on Debian/Ubuntu if missing).
 
 ``--no-titlebar``
@@ -241,14 +242,17 @@ Command-line reference
     - Toggle entries
     - Gesture entries where **only** ``"single"`` is defined (no
       ``"double"``, ``"triple"``, ``"long"``, or ``"repeat"``)
+    - The ``"single"`` of an ``"eager_single"`` entry, on the press
+    - Outputs fired by a release: a ``"single"`` on quick release, and a
+      fast-chord fallback
     - Chord completions -- when all chord keys arrive within the window
 
     The following features are **not synchronous** and fire via timer
     callbacks regardless of backend, so they see no timing benefit:
 
-    - Any gesture entry that includes ``"double"``, ``"triple"``,
-      ``"long"``, or ``"repeat"`` (even the ``"single"`` branch of such
-      an entry waits for the multipress window)
+    - The deferred parts of a gesture entry: ``"double"``, ``"triple"``,
+      ``"long"`` and ``"repeat"``, and a ``"single"`` that has to wait for
+      the multi-press window to close
     - Chord fallback (when the chord does not complete in time)
     - Chord multipress (``"double"`` / ``"triple"`` chord completions)
     - Delayed sends (``"delay": ...``)
@@ -280,8 +284,7 @@ Command-line reference
     to the display are a bare ``deque.append()`` (no mutex, no cross-process
     call), and a background relay thread forwards them to the display process
     over a pipe.  With a lean handler and a reasonable buffer size (e.g. 512
-    samples) this mode is often workable in practice.  If no xruns are
-    observed it is worth using.
+    samples) this mode is often workable in practice.
 
     **Watch for xruns after switching.**  Compare JACK's xrun count
     (QjackCtl shows it) over a session or two with and without
@@ -352,6 +355,23 @@ A single file can hold multiple BankSets as a list::
             ...
         },
     ]
+
+**BankSet options**
+
+Besides ``"name"``, ``"banks"`` and ``"active_bank"`` (default
+``"default"``), a BankSet dict may set its own ``"long_press_ms"``,
+``"multi_press_window_ms"``, ``"chord_window_ms"`` and ``"debounce_ms"``
+(see `Timing constants`_), ``"debug"`` (see `Debug output`_), and
+``"data_offset"`` -- the numbering base for channels, default 1 (see
+``"channel"`` under `Sequence item reference`_).
+
+**Global settings block**
+
+In a list-format file, the first item may be a settings dict with no
+``"banks"`` key.  Its only setting is ``"debug"``, which switches the
+dispatcher-level debug output and can be changed while the program runs
+(see `Debug output`_ and `Live reloading`_).  A single-dict file cannot
+have one.
 
 Validate before running::
 
@@ -438,7 +458,7 @@ define are active -- the rest are ignored::
         "long_ms": 400,
     },
 
-    # Multi-press -- incurs MULTI_PRESS_WINDOW_MS delay (default 300ms)
+    # Multi-press -- single waits for the multi-press window (default 300 ms)
     "CC0": {
         "single": [{"send": "CC10", "value": 127}],
         "double": [{"send": "CC20", "value": 127}],
@@ -533,7 +553,7 @@ secondary action::
     },
 
     # Tap fires CC10 instantly; double-tap fires CC20 from the window timer.
-    # Without eager_single, single would wait 300ms (MULTI_PRESS_WINDOW_MS).
+    # Without eager_single, single would wait for the multi-press window.
     "CC5": {
         "eager_single": True,
         "single": [{"send": "CC10", "value": 127}],
@@ -554,18 +574,18 @@ fires ``"single"`` immediately in that case.
 
 **Chord**
 
-Fires when all keys in the tuple arrive within ``CHORD_WINDOW_MS``
-(default 80ms)::
+Fires when all keys of the chord arrive within the chord window
+(``chord_window_ms``, default 80 ms)::
 
     "CC1+CC2": {
         "single": [{"send": "BANK", "bank": "drums"}],
         "double": [{"send": "BANK", "bank": "ardour"}],
     },
 
-All-CC or all-NOTE chords are **fast chords**: if only one key arrives
-and is then released, the window cancels immediately and the individual
-key mapping fires with near-zero latency.  Mixed PC/CC chords always wait
-the full window.
+All-CC or all-NOTE chords are **fast chords**: if only one key arrives and
+is then released, the window closes at once and that key's own mapping
+fires on the release, without waiting out the window.  Chords that mix PC
+and CC keys always wait the full window.
 
 .. important::
 
@@ -773,16 +793,16 @@ Latency summary
 +-----------------------------------+------------------------------+
 | Toggle                            | Immediately on press (~0ms)  |
 +-----------------------------------+------------------------------+
-| Chord (complete)                  | When last key arrives (~0ms) |
+| Chord (complete)                  | When the last key arrives    |
 +-----------------------------------+------------------------------+
-| Fast chord fallback               | On key release (~0ms)        |
+| Fast chord fallback               | On key release               |
 +-----------------------------------+------------------------------+
-| Standard chord fallback           | After CHORD_WINDOW_MS (80ms) |
+| Standard chord fallback           | After chord_window_ms (80 ms)|
 +-----------------------------------+------------------------------+
-| Gesture multi-press               | After MULTI_PRESS_WINDOW_MS  |
-|                                   | (300ms default)              |
+| Gesture multi-press               | After multi_press_window_ms  |
+|                                   | (300 ms default)             |
 +-----------------------------------+------------------------------+
-| Gesture long                      | At long_ms threshold         |
+| Gesture long                      | At the long-press threshold  |
 +-----------------------------------+------------------------------+
 | Gesture single + long (single)    | On quick release             |
 +-----------------------------------+------------------------------+
@@ -808,8 +828,11 @@ Sequence item reference
 Each output in a sequence is a dict with the following keys:
 
 ``"send"`` *(required)*
-    The event to send: ``"CC<n>"``, ``"PC<n>"``, or ``"NOTE<n>"``.
-    Special value ``"BANK"`` switches banks (also requires ``"bank"``).
+    The event to send: ``"CC<n>"``, ``"PC<n>"``, or ``"NOTE<n>"`` -- or one
+    of the special values ``"BANK"`` (switch banks; needs ``"bank"``),
+    ``"CMD"`` (run a shell command; needs ``"cmd"``), ``"JACK_TRANSPORT"``
+    (needs ``"transport"``) or ``"OSC"`` (needs ``"host"``, ``"port"``
+    and ``"address"``).
 
 ``"value"``
     CC value 0--127.  If omitted, the incoming event value is forwarded.
@@ -825,7 +848,11 @@ Each output in a sequence is a dict with the following keys:
     direct mappings.
 
 ``"delay"``
-    Seconds to wait before sending (default 0.0).
+    Seconds to wait before sending (default 0).  Values up to 1 ms
+    (``0.001``) send at once, as if there were no delay -- handy when trying
+    out delay values without changing the format; the smallest value that
+    actually waits is ``0.002`` (2 ms).  Delayed sends run in a background
+    thread; see `Stuck-send warnings`_.
 
 ``"channel"``
     MIDI channel for the outgoing event (integer, 1--16 with the default
@@ -879,13 +906,37 @@ Each output in a sequence is a dict with the following keys:
     Using ``"velocity"`` on a CC send or ``"value"`` on a NOTE send is a
     config error caught by ``--validate`` at startup.
 
+Entry keys
+----------
+
+Besides the labelled sequences (``"single"``, ``"double"``, ``"triple"``,
+``"long"``, ``"repeat"``, and ``"a"``/``"b"`` for toggles), an entry dict
+may hold these keys:
+
 ``"eager_single"``
-    Boolean (``True`` or ``False``, default ``False``).  Applies to gesture
-    entries only.  When ``True``, fires the ``"single"`` sequence immediately
-    on the first press, then lets ``"long"``, ``"double"``, ``"triple"``, and
-    ``"repeat"`` resolve normally.  Eliminates the latency that ``"long"`` or
-    ``"double"`` would otherwise impose on the ``"single"`` action.  See
-    `Mapping types`_ for usage examples and constraints.
+    ``True`` or ``False`` (default ``False``); gesture entries only.  When
+    ``True``, the ``"single"`` sequence fires immediately on the first press,
+    and ``"long"``, ``"double"``, ``"triple"`` and ``"repeat"`` still resolve
+    normally afterward -- removing the wait they would otherwise put on
+    ``"single"``.  See `Mapping types`_ for examples and constraints.
+
+``"long_ms"``
+    Long-press threshold for this key (see ``long_press_ms`` under `Timing
+    constants`_).
+
+``"multi_ms"``
+    Multi-press window for this key (see ``multi_press_window_ms``).
+
+``"repeat_delay_ms"``, ``"repeat_ms"``, ``"repeat_accel"``
+    Hold-repeat timing for this key (see `Mapping types`_ and `Timing
+    constants`_).
+
+``"debounce_ms"``
+    Toggle debounce for this key (see ``debounce_ms``).
+
+``"trigger_value"``
+    Only dispatch when the incoming value matches (see `Trigger value
+    filtering`_).
 
 Trigger value filtering
 -----------------------
@@ -904,20 +955,24 @@ Supported forms::
     "trigger_value": "64-127"       # inclusive range
     "trigger_value": ">64"          # greater than
     "trigger_value": "<=64"         # less than or equal
-    "trigger_value": [1, "64-127"]  # OR list (avoid 0 for CC keys)
+    "trigger_value": [1, "64-127"]  # OR list
+
+Avoid ``0`` for CC keys: a CC with value 0 counts as a release.
 
 Timing constants
 ----------------
 
-These can be overridden per-file or on the command line:
+These defaults apply to every BankSet.  Each can be changed for one
+BankSet with the same key in its dict, and some also per key or on the
+command line, as listed:
 
 ``long_press_ms`` (default 500)
-    Threshold for the ``"long"`` gesture action.
-    Override per-key with ``"long_ms"`` in the entry dict.
+    Threshold for the ``"long"`` gesture.  Per key: ``"long_ms"``.
+    Command line: ``--long-press-ms``.
 
 ``multi_press_window_ms`` (default 300)
-    Accumulation window for double/triple press (gesture and chord).
-    Override per-key with ``"multi_ms"`` in the entry dict::
+    Accumulation window for double/triple press (gesture and chord).  Per
+    key: ``"multi_ms"``.  Command line: ``--multi-press-ms``::
 
         "CC0": {
             "single": [{"send": "CC10", "value": 127}],
@@ -926,61 +981,46 @@ These can be overridden per-file or on the command line:
         },
 
 ``chord_window_ms`` (default 80)
-    Window within which all chord keys must arrive.
+    Window within which all chord keys must arrive.  Command line:
+    ``--chord-ms``.
 
 ``debounce_ms`` (default 60)
-    Minimum time between toggle triggers.
+    Minimum time between toggle triggers.  Per key: ``"debounce_ms"``.
 
-``repeat_delay_ms`` (default 500)
-    Hold time before the first repeat fires.
-    Override per-key with ``"repeat_delay_ms"`` in the entry dict.
+``repeat_delay_ms`` (default 500) and ``repeat_ms`` (default 100)
+    Hold time before the first repeat fires, and the interval between
+    later repeats.  Set per key only, with the same names; there are no
+    BankSet-wide or command-line versions.  ``"repeat_accel"`` tiers, also
+    per key, are described in `Mapping types`_.
 
-``repeat_ms`` (default 100)
-    Interval between subsequent repeat firings.
-    Override per-key with ``"repeat_ms"`` in the entry dict.
+Stuck-send warnings
+-------------------
 
-``repeat_accel``
-    Optional list of acceleration tiers for ``"repeat"`` gestures.
-    Not a global constant -- specified per entry only.
-    See `Mapping types`_ for the full tier syntax.
+Delayed sends (``"delay"``) run in a background thread.  If the JACK
+graph stalls while a delayed send is pending, that thread may block
+silently while handing the event to JACK.  The remapper notices this and
+prints a warning::
 
-``delay`` (sequence item key)
-    Seconds to wait before sending an item in a sequence.  Items with
-    ``"delay": 0`` or ``"delay": 0.001`` (at or below 1 ms) are sent
-    synchronously as if no delay were present — useful when testing a
-    config with different delay values without changing the format.
-    The smallest value that actually schedules a timer is **0.002** (2 ms).
+    [actition] WARNING: delayed MIDI send stuck 3.2s past due —
+        _output_fn may be blocked (JACK graph stalled?): CtrlEvent(...)
 
-    Delayed sends run in a background thread.  If the JACK graph stalls
-    while a delayed send is pending, that thread may block silently in
-    ``_output_fn``.  The remapper detects this and prints a warning::
+``JACK_TRANSPORT`` actions (``start``, ``stop``, ``locate <frame>``) also
+run in a background thread, so they never block MIDI handling, and are
+watched the same way.  A local JACK call normally returns in well under a
+second; one still running past that is almost certainly waiting on a
+stalled graph (for example, another client stuck in its own process
+callback -- an LV2 plugin saving its state on a transport relocate is one
+known cause)::
 
-        [actition] WARNING: delayed MIDI send stuck 3.2s past due —
-            _output_fn may be blocked (JACK graph stalled?): CtrlEvent(...)
+    [actition] WARNING: JACK transport call stuck 2.1s —
+        jack.Client call may be blocked (JACK graph stalled?): locate 0
 
-    The warning fires once per stuck thread, so repeated stalls each
-    produce exactly one line.  If the JACK graph recovers (e.g. the
-    blocking client is killed), the thread unblocks and completes normally.
-
-``JACK_TRANSPORT`` (send type)
-    ``start``, ``stop``, and ``locate <frame>`` also run in a background
-    thread (so they never block the mididings callback), and are watched
-    by the same stuck-thread detection as delayed sends above.  A local
-    JACK client call ordinarily returns in well under a second; if one is
-    still running past that, it is almost certainly parked inside the
-    JACK client library waiting on a stalled graph (e.g. another client
-    wedged in its own process callback -- an LV2 plugin state save on
-    transport relocate is one known trigger)::
-
-        [actition] WARNING: JACK transport call stuck 2.1s —
-            jack.Client call may be blocked (JACK graph stalled?): locate 0
-
-    Like the delay-send warning, this fires once per stuck thread. It
-    only reports a hang after a periodic check happens to run while the
-    thread is still stuck -- it cannot detect the instant a call starts
-    blocking, and it stops watching a given call once ``cancel_timers()``
-    runs (e.g. on a hot config reload), since the tracking list is
-    cleared along with everything else at that point.
+Each warning prints once per stuck thread, so repeated stalls each give
+exactly one line.  If the graph recovers (for example, the blocking client
+is killed), the thread unblocks and finishes normally.  The check runs
+periodically, so it reports a hang some time after it starts, not at the
+instant; and a config reload stops the watch on any calls already in
+progress.
 
 Bank display window
 -------------------
@@ -1045,17 +1085,17 @@ Debug output
 
 Two independent debug flags control what is printed:
 
-``config.DEBUG`` (dispatcher level)
+Dispatcher level
     Prints ``[in]`` (every incoming event), ``[dispatch]`` (which BankSet
-    handled it), and startup messages.  Set to ``True`` in ``config.py``,
-    use ``--debug`` on the command line, or add ``"debug": True`` to the
-    global settings block of a config file (this last option is
-    hot-reloadable).
+    handled it), and startup messages.  Turn it on with ``--debug``, with
+    ``"debug": True`` in a config file's global settings block (which can
+    be changed while running), or with ``DEBUG`` in the package's
+    ``config.py``.
 
-``BankSet._debug`` (BankSet level)
+BankSet level
     Prints ``[BankSet:name] handle key=...``, gesture timing, chord
-    windows, and sequence dispatch detail for that specific BankSet.
-    Set per-BankSet via ``"debug": True`` inside a BankSet dict.
+    windows, and sequence dispatch detail for one BankSet.  Turn it on with
+    ``"debug": True`` inside that BankSet's dict.
 
 The ``--debug`` CLI flag sets both levels simultaneously and is the
 simplest way to get full output.  Setting ``"debug": True`` inside a
@@ -1124,7 +1164,8 @@ on the command line, or permanently via ``CLIENT_NAME`` in ``config.py``.
 Development
 -----------
 
-Clone and install in editable mode::
+With the system libraries from `Installation`_ in place, clone and
+install in editable mode, then run the tests::
 
     git clone https://github.com/abarker/midiremapper.git
     cd midiremapper
@@ -1183,9 +1224,9 @@ Running both is the only way to confirm both implementations are correct.
 The flag must be an environment variable rather than a command-line switch
 because the choice is made at module import time, before argument parsing.
 
-Phase 1 (current) uses C-typed local variables to reduce Python attribute
-lookup overhead on every event.  Phase 2 (future) will add ``nogil``
-sections for the scalar classification logic.
+The extension uses C-typed local variables to cut Python attribute-lookup
+overhead on every event.  Adding ``nogil`` sections for the scalar
+classification logic is a possible later step.
 
 License
 -------
