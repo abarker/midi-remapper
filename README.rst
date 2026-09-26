@@ -1039,21 +1039,31 @@ In titlebar-less mode, right-click anywhere on the window for a menu with
 
 The window stays on top of other windows and updates immediately on every
 bank switch, so you can glance at it during a performance to confirm that
-a chord or double press registered correctly.  The small label at the top
-names the BankSet; the colours come from each bank's ``"_display"`` style
-(see *Per-bank styling* below).
+a chord or double press registered correctly.
+
+The large text is the name of the active bank.  The small label above it is
+the **BankSet name** -- the ``"name"`` key of the BankSet in your config
+file, not anything detected from the hardware.  In the screenshots below it
+is ``actition``, the name one config gives to the BankSet holding the
+mappings for its ActitioN footswitch.  When a config has several BankSets,
+the window shows whichever one last switched banks (at startup, the first
+BankSet that has more than one bank or starts on a bank other than
+``"default"``).  The colours come from each bank's
+``"_display"`` style (see *Per-bank styling* below).
 
 .. figure:: screenshots/bank-display-drums.png
    :alt: Bank display window showing the bank name "drums" in salmon text
          on a dark red background
 
-   A ``drums`` bank, styled ``{"bg": "#2e1a1a", "fg": "#ffb0a0"}``.
+   The ``drums`` bank of the ``actition`` BankSet, styled
+   ``{"bg": "#2e1a1a", "fg": "#ffb0a0"}``.
 
 .. figure:: screenshots/bank-display-looper.png
    :alt: Bank display window showing the bank name "looper" in light green
          text on a dark green background
 
-   A ``looper`` bank, styled ``{"bg": "#1a2e1a", "fg": "#a0ffb0"}``.
+   The ``looper`` bank of the ``actition`` BankSet, styled
+   ``{"bg": "#1a2e1a", "fg": "#a0ffb0"}``.
 
 **Per-bank styling**
 
