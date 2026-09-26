@@ -14,7 +14,6 @@ from mididings import config as mididings_config, run as mididings_run, \
 import mididings.engine as engine
 
 from midi_event_remapper import config
-from midi_event_remapper.midi import event_key
 
 
 def check_jack():
