@@ -217,11 +217,6 @@ CLIENT_NAME = 'midi_remapper'
 IN_PORT     = 'in_0'
 OUT_PORT    = 'out_0'
 
-# TODO: All output events are forced to a single channel by the Output()
-# command in dispatcher.py.  Multi-channel output requires rethinking
-# how Output() is used.
-PORT_INDEX  = 1   # first port (with DATA_OFFSET=1)
-CHANNEL     = 5   # forced output channel
 
 # --------------------------------------------------------------------------
 # Global timing and behaviour constants

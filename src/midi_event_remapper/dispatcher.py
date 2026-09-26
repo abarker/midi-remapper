@@ -10,7 +10,7 @@ import sys
 import time
 
 from mididings import config as mididings_config, run as mididings_run, \
-    Process, Output
+    Process
 import mididings.engine as engine
 
 from midi_event_remapper import config
@@ -167,8 +167,7 @@ def run():
 
     try:
         mididings_run(
-            Process(main_handler) # >>
-            #Output(port=config.PORT_INDEX, channel=config.CHANNEL)
+            Process(main_handler)
         )
     except KeyboardInterrupt:
         pass  # clean Ctrl-C exit, message printed below
