@@ -1039,7 +1039,21 @@ In titlebar-less mode, right-click anywhere on the window for a menu with
 
 The window stays on top of other windows and updates immediately on every
 bank switch, so you can glance at it during a performance to confirm that
-a chord or double-press registered correctly.
+a chord or double press registered correctly.  The small label at the top
+names the BankSet; the colours come from each bank's ``"_display"`` style
+(see *Per-bank styling* below).
+
+.. figure:: screenshots/bank-display-drums.png
+   :alt: Bank display window showing the bank name "drums" in salmon text
+         on a dark red background
+
+   A ``drums`` bank, styled ``{"bg": "#2e1a1a", "fg": "#ffb0a0"}``.
+
+.. figure:: screenshots/bank-display-looper.png
+   :alt: Bank display window showing the bank name "looper" in light green
+         text on a dark green background
+
+   A ``looper`` bank, styled ``{"bg": "#1a2e1a", "fg": "#a0ffb0"}``.
 
 **Per-bank styling**
 
