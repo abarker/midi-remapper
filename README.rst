@@ -36,6 +36,19 @@ the clone, or wherever you prefer, then activate it::
     python3 -m venv .venv
     source .venv/bin/activate
 
+``mididings``, which pip installs as a dependency, is compiled during
+installation, so first install the system libraries it builds against::
+
+    # Debian / Ubuntu
+    sudo apt install build-essential pkg-config python3-dev \
+        libasound2-dev libjack-jackd2-dev \
+        libboost-python-dev libboost-thread-dev libglib2.0-dev
+
+The ``mididings`` that pip installs is the maintained community version
+from PyPI.  Don't use a distribution package instead: Ubuntu 24.04 has
+none, and older ones, where they exist, are the original, unmaintained
+release.
+
 Then choose one of the four install options below.
 
 **Install options**
