@@ -563,7 +563,11 @@ secondary action::
 Behaviour: on each first press, ``"single"`` fires immediately and is then
 forgotten.  ``"long"`` / ``"double"`` / ``"triple"`` / ``"repeat"`` still
 resolve at their normal times and fire in addition, never re-firing
-``"single"``.
+``"single"``: the later presses of a double or triple do not fire it
+again.  Since the deferred action fires after the eager ``"single"`` has
+already acted, it must suit the state the single left behind; for a
+looper, that usually means an action designed to reverse the single
+first.
 
 Constraints: ``"eager_single": True`` requires a ``"single"`` key.  A
 ``"BANK"`` send inside an eager ``"single"`` sequence is a validation
