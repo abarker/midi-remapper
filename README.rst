@@ -180,11 +180,15 @@ Command-line reference
     up less screen space.  Right-click anywhere on the window to show a menu
     with **Exit** (quit the program) and **Cancel** (dismiss the menu).
 
-``--save-pos [FILE]``
+``--save-pos``
     Save the bank display window position on exit and restore it on the
-    next run (implies ``--display``).  With no argument, uses
-    ``~/.config/midi-remapper/display.pos``.  Pass an explicit path when
-    running multiple configs that need separate positions.
+    next run (implies ``--display``).  Uses
+    ``~/.config/midi-remapper/display.pos`` unless ``--pos-file`` is given.
+
+``--pos-file FILE``
+    The file for the saved window position (implies ``--save-pos``).  Use
+    one per config when running several configs that need separate
+    positions.
 
 ``--validate``, ``-V``
     Validate config files and exit without connecting to JACK.  Use this

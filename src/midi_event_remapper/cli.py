@@ -36,7 +36,7 @@ Remember the display window position across runs (default path):
     midi-remapper actition.py --display --save-pos
 
 Remember the position in a specific file:
-    midi-remapper actition.py --display --save-pos ~/mysetup.pos
+    midi-remapper actition.py --display --pos-file ~/mysetup.pos
 
 Disable live config reloading:
     midi-remapper actition.py --no-reload
@@ -48,9 +48,18 @@ Override the JACK client name (e.g. when running two instances):
     midi-remapper actition.py --client-name midi_remapper_2
 """
 import argparse
+import os
 import signal
 import sys
 from pathlib import Path
+
+
+def _default_pos_file():
+    """Default file for --save-pos, under $XDG_CONFIG_HOME."""
+    return str(
+        Path(os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config"))
+        / "midi-remapper" / "display.pos"
+    )
 
 
 def build_parser():
@@ -159,24 +168,28 @@ def build_parser():
         ),
     )
 
-    import os
-    _default_pos_file = str(
-        Path(os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config"))
-        / "midi-remapper" / "display.pos"
-    )
+    # --save-pos is a plain flag and the file has its own option.  An
+    # optional argument (nargs="?") would swallow a config file that follows
+    # it, e.g. "--save-pos actition.py" left no FILE positional.
     parser.add_argument(
         "--save-pos",
-        nargs   = "?",
-        const   = _default_pos_file,
-        default = None,
+        action  = "store_true",
         dest    = "save_pos",
-        metavar = "FILE",
         help    = (
             "Save the display window position on exit and restore it on the "
-            "next run (implies --display).  With no argument, uses "
-            f"{_default_pos_file}.  "
-            "Pass an explicit path to use a different file, e.g. when "
-            "running multiple configs that need separate positions."
+            "next run (implies --display).  Uses "
+            f"{_default_pos_file()} unless --pos-file is given."
+        ),
+    )
+    parser.add_argument(
+        "--pos-file",
+        default = None,
+        dest    = "pos_file",
+        metavar = "FILE",
+        help    = (
+            "File for the saved display window position (implies "
+            "--save-pos).  Use one per config when several configs need "
+            "separate positions."
         ),
     )
 
@@ -356,14 +369,20 @@ def main():
         global_config.DEBUG = args.debug
 
     # --display: start the bank name window and wire it into each BankSet.
-    # --no-titlebar and --save-pos both imply --display.
+    # --no-titlebar and --save-pos both imply --display; --pos-file implies
+    # --save-pos.
+    save_pos = None
+    if args.pos_file:
+        save_pos = args.pos_file
+    elif args.save_pos:
+        save_pos = _default_pos_file()
     display = None
-    if args.display or args.no_titlebar or args.save_pos:
+    if args.display or args.no_titlebar or save_pos:
         try:
             from midi_event_remapper.bank_display import BankDisplay
             display = BankDisplay(
                 no_titlebar = args.no_titlebar,
-                save_pos    = args.save_pos,
+                save_pos    = save_pos,
             )
             display.start()
             for bs in banksets:
