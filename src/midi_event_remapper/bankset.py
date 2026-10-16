@@ -24,6 +24,15 @@ from midi_event_remapper.config import urgent_print
 # The smallest meaningful real delay is therefore 0.002 s (2 ms).
 _IMMEDIATE_DELAY_S = 0.001
 
+# Smallest allowed "snapback_after_ms" on a BANK send.  Every mapped event
+# pushes the snapback deadline, so keeping the timeout well above every
+# gesture window means no gesture can still be pending when it runs out.
+_SNAPBACK_MIN_MS = 2000
+
+# How often the snapback timer re-checks while a pedal is held past the
+# deadline.
+_SNAPBACK_HELD_POLL_S = 0.25
+
 
 def _wall_clock():
     """Return the current local wall-clock time as 'HH:MM:SS.mmm'.
@@ -219,6 +228,20 @@ class BankSet:
         # in whatever bank is active at release time.
         self._chord_consumed = set()
 
+        # Snapback.  A BANK send with "snapback_after_ms" fills the slot
+        # with the bank it switched *from*; once the pedals have been idle
+        # that long, a timer switches back to it.  One slot, not a stack:
+        # later timed switches keep the target and only restart the idle
+        # time.
+        self._snapback_bank     = None  # origin of the first timed switch; None = empty
+        self._snapback_after_s  = 0.0
+        self._snapback_deadline = 0.0   # time.monotonic()
+        self._snapback_gen      = 0     # bumped on arm and clear; stale timers exit
+        self._snapback_timer    = None  # most recent snapback Timer (for tests)
+        # Keys pressed and not yet released whose mapping needs the release
+        # (see _release_matters).  The snapback waits while any is held.
+        self._held_keys         = set()
+
         # Keep timer references alive until they fire.
         self._timer_list = []
 
@@ -249,6 +272,7 @@ class BankSet:
         # Precomputed lookup tables
         self._entry_types   = {}   # (bank_name, key) -> type string
         self._chord_members = {}   # bank_name -> {key -> [frozenset, ...]}
+        self._hold_keys     = {}   # bank_name -> {key whose release matters}
 
         self._build_lookup_tables()
 
@@ -293,6 +317,7 @@ class BankSet:
         # daemon thread) until the call returns or the process exits.
         self._transport_threads.clear()
         self._stuck_transport_ids.clear()
+        self._clear_snapback()
 
     @property
     def current_bank(self):
@@ -312,6 +337,10 @@ class BankSet:
                 f"{'='*50}\n"
             )
         self.active_bank = name
+        # Arriving at the snapback target, by hand or by the snapback
+        # itself, empties the slot.
+        if name == self._snapback_bank:
+            self._clear_snapback()
         if self._display_fn is not None:
             try:
                 style = self._display_styles.get(name)
@@ -334,9 +363,30 @@ class BankSet:
         if key is None:
             return None
 
+        rel = is_release(event)
+
+        # A second press of a key still marked held means its release was
+        # missed; forget it so it cannot block the snapback.
+        if not rel:
+            self._held_keys.discard(key)
+
         bank_name     = self.active_bank
         bank          = self.banks[bank_name]
         chord_members = self._chord_members.get(bank_name, {})
+
+        # Pedal use: a key mapped in the active bank, or the release of a
+        # press tracked earlier (possibly in another bank).  It restarts
+        # the snapback idle time; other traffic on the input does not.
+        # A press is held (holding off the snapback) only where the
+        # mapping needs its release; see _release_matters().
+        if key in bank or key in chord_members or key in self._held_keys:
+            if rel:
+                self._held_keys.discard(key)
+            elif key in self._hold_keys[bank_name]:
+                self._held_keys.add(key)
+            if self._snapback_bank is not None:
+                self._snapback_deadline = (time.monotonic()
+                                           + self._snapback_after_s)
 
         if self._debug:
             print(f"[BankSet:{self.name}] handle key={key}")
@@ -350,8 +400,6 @@ class BankSet:
             if _now - self._last_leak_check > 5.0:
                 self._last_leak_check = _now
                 self._cleanup_timers()
-
-        rel = is_release(event)
 
         # ── Release handling ───────────────────────────────────────────
         if rel:
@@ -435,6 +483,20 @@ class BankSet:
         ch_min = self._data_offset
         ch_max = 15  + self._data_offset
 
+        # Longest gesture window anywhere in the BankSet; a timed return
+        # must be longer (see _SNAPBACK_MIN_MS).
+        windows = [self._long_press_ms, self._multi_press_window_ms,
+                   self._chord_window_ms]
+        for bank in self.banks.values():
+            for k, v in bank.items():
+                if k in self._BANK_META_KEYS or not isinstance(v, dict):
+                    continue
+                for wk in ("long_ms", "multi_ms"):
+                    w = v.get(wk)
+                    if isinstance(w, (int, float)) and not isinstance(w, bool):
+                        windows.append(w)
+        longest_window_ms = max(windows)
+
         def check_sequence(seq, ctx):
             for i, item in enumerate(seq):
                 if "send" not in item:
@@ -451,6 +513,28 @@ class BankSet:
                             f"{ctx}[{i}]: BANK send references unknown "
                             f"bank {item['bank']!r}"
                         )
+                    if "snapback_after_ms" in item:
+                        ms = item["snapback_after_ms"]
+                        if isinstance(ms, bool) or \
+                                not isinstance(ms, (int, float)):
+                            errors.append(
+                                f"{ctx}[{i}]: BANK 'snapback_after_ms' must "
+                                f"be a number of milliseconds (got {ms!r})"
+                            )
+                        elif ms < _SNAPBACK_MIN_MS:
+                            errors.append(
+                                f"{ctx}[{i}]: BANK 'snapback_after_ms' must "
+                                f"be at least {_SNAPBACK_MIN_MS} (got {ms})"
+                            )
+                        elif ms <= longest_window_ms:
+                            errors.append(
+                                f"{ctx}[{i}]: BANK 'snapback_after_ms' must "
+                                f"be longer than the longest long, multi "
+                                f"or chord window in this BankSet "
+                                f"({longest_window_ms} ms; got {ms})"
+                            )
+                    continue
+                if send == "SNAPBACK_CANCEL":
                     continue
                 if send == "CMD":
                     if "cmd" not in item:
@@ -838,6 +922,7 @@ class BankSet:
     def _build_lookup_tables(self):
         for bank_name, bank in self.banks.items():
             self._chord_members[bank_name] = {}
+            self._hold_keys[bank_name]     = set()
             for key, value in bank.items():
                 if key in self._BANK_META_KEYS:
                     continue
@@ -848,6 +933,8 @@ class BankSet:
                     # cleanly rather than crashing __init__.
                     etype = "unknown"
                 self._entry_types[(bank_name, key)] = etype
+                if self._release_matters(key, etype, value):
+                    self._hold_keys[bank_name].add(key)
                 if isinstance(key, tuple):
                     fk = frozenset(key)
                     for k in key:
@@ -896,6 +983,26 @@ class BankSet:
             except Exception:
                 pass  # pythonosc not installed or target unreachable
 
+    @staticmethod
+    def _release_matters(key, etype, value):
+        """True if a press of this entry must be followed by its release
+        in the same bank, so a held pedal holds off the snapback.
+
+        That is a gesture with 'long' or 'repeat' (they time the hold, and
+        validate() already requires a momentary CC/NOTE key for them), or
+        a direct entry that forwards the release (an item without
+        'press_only').  Other entries take each press and release as a
+        moment of use, so latching pedals work with them.
+        """
+        if not isinstance(key, str) or key.startswith("PC"):
+            return False      # chords, and PC (which has no release)
+        if etype == "gesture":
+            return "long" in value or "repeat" in value
+        if etype == "direct":
+            return any(not (isinstance(item, dict) and item.get("press_only"))
+                       for item in value)
+        return False
+
     def _classify(self, key, value):
         """Infer the behaviour type of a bank entry from its shape."""
         if isinstance(key, tuple):
@@ -930,7 +1037,24 @@ class BankSet:
             delay = float(item.get("delay", 0.0))
 
             if send == "BANK":
+                after_ms = item.get("snapback_after_ms")
+                if after_ms is not None:
+                    self._arm_snapback(after_ms / 1000.0)
+                elif self._snapback_bank is not None:
+                    # A plain switch is a deliberate choice of bank: it
+                    # cancels any pending snapback.
+                    if self._debug:
+                        print(f"[snapback:{self.name}] cancelled by switch "
+                              f"to {item['bank']!r}")
+                    self._clear_snapback()
                 self.switch_bank(item["bank"])
+                continue
+
+            if send == "SNAPBACK_CANCEL":
+                if self._debug and self._snapback_bank is not None:
+                    print(f"[snapback:{self.name}] cancelled, staying in "
+                          f"{self.active_bank!r}")
+                self._clear_snapback()
                 continue
 
             if send == "CMD":
@@ -1131,6 +1255,70 @@ class BankSet:
         if result:
             for ev_out in result:
                 self._output_fn(ev_out)
+
+    # ------------------------------------------------------------------
+    # Snapback (timed return from a bank switch)
+    # ------------------------------------------------------------------
+
+    def _arm_snapback(self, after_s):
+        """Fill or refresh the snapback slot for a timed BANK switch.
+
+        Called just before switch_bank(), so active_bank is still the bank
+        being left.  If the slot is already full its target is kept; the
+        new timeout replaces the old one.  Either way a fresh timer chain
+        starts (a shorter new timeout must not wait for the old timer).
+
+        The deadline is written before _snapback_bank: a long-press BANK
+        send runs on a timer thread, and this order means handle() on the
+        MIDI thread never sees a full slot with a stale deadline.
+        """
+        self._snapback_after_s  = after_s
+        self._snapback_deadline = time.monotonic() + after_s
+        if self._snapback_bank is None:
+            self._snapback_bank = self.active_bank
+        self._snapback_gen += 1
+        self._schedule_snapback(self._snapback_gen, after_s)
+        if self._debug:
+            print(f"[snapback:{self.name}] back to "
+                  f"{self._snapback_bank!r} after {after_s:.1f}s idle")
+
+    def _clear_snapback(self):
+        """Empty the snapback slot.  Any pending snapback timer exits."""
+        self._snapback_bank = None
+        self._snapback_gen += 1
+
+    def _schedule_snapback(self, gen, delay_s):
+        t = threading.Timer(delay_s, self._snapback_timer_fired, args=(gen,))
+        t.daemon = True
+        t.start()
+        self._timer_list.append(t)
+        self._snapback_timer = t
+
+    def _snapback_timer_fired(self, gen):
+        """Switch back once the idle time has run out and no pedal is held.
+
+        Runs on a timer thread, like a long-press BANK switch.  Pedal use
+        only ever moves the deadline later, so a timer that wakes early
+        just sleeps for the remainder.  No pedal is held when it switches,
+        so every later release belongs to a press made in the new bank,
+        and the timeout floor (_SNAPBACK_MIN_MS) means no gesture window
+        is still open.
+        """
+        if not self._active or gen != self._snapback_gen:
+            return
+        target = self._snapback_bank
+        if target is None:
+            return
+        remaining = self._snapback_deadline - time.monotonic()
+        if remaining > 0:
+            self._schedule_snapback(gen, remaining)
+        elif self._held_keys:
+            self._schedule_snapback(gen, _SNAPBACK_HELD_POLL_S)
+        else:
+            if self._debug:
+                print(f"[snapback:{self.name}] idle time ran out -> "
+                      f"{target!r}")
+            self.switch_bank(target)   # also empties the slot
 
     # ------------------------------------------------------------------
     # Toggle

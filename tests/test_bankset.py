@@ -2094,3 +2094,450 @@ class TestSendErrorsNotGatedOnDebug:
 
         captured = capsys.readouterr()
         assert "[osc] ERROR" in captured.err
+
+
+# ---------------------------------------------------------------------------
+# Timed return from a bank switch (snapback)
+# ---------------------------------------------------------------------------
+
+class _FakeClock:
+    """Stands in for the ``time`` module inside bankset.py: monotonic() is
+    controlled by the test, everything else (time.time for gestures)
+    passes through to the real module."""
+
+    def __init__(self):
+        self.now = 1000.0
+
+    def monotonic(self):
+        return self.now
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    import midi_event_remapper.bankset as bankset_mod
+    c = _FakeClock()
+    monkeypatch.setattr(bankset_mod, "time", c)
+    return c
+
+
+# PC5 sends a different CC in each bank, which shows where a press landed.
+SNAPBACK_BANKS = {
+    "looper": {
+        "PC1": [{"send": "BANK", "bank": "drums", "snapback_after_ms": 4000}],
+        "PC2": [{"send": "BANK", "bank": "drums"}],
+        "PC5": [{"send": "CC13", "value": 127}],
+    },
+    "drums": {
+        "PC1": [{"send": "BANK", "bank": "tap", "snapback_after_ms": 6000}],
+        "PC3": [{"send": "BANK", "bank": "tap"}],
+        "PC4": [{"send": "BANK", "bank": "looper"}],
+        "PC5": [{"send": "CC0", "value": 127}],
+        "CC1": {"single":  [{"send": "CC20", "value": 127}],
+                "long":    [{"send": "CC21", "value": 127}],
+                "long_ms": 500},
+        ("CC2", "CC3"): {"single": [{"send": "CC22", "value": 127}]},
+        "CC4": [{"send": "CC40"}],                       # direct
+        "CC5": {"a": [{"send": "CC50", "value": 127}],   # toggle
+                "b": [{"send": "CC50", "value": 0}]},
+        "PC6": [{"send": "SNAPBACK_CANCEL"}],
+        "CC6": {"single":          [{"send": "CC60", "value": 127}],   # tempo up
+                "repeat":          [{"send": "CC60", "value": 127}],
+                "repeat_delay_ms": 400,
+                "repeat_ms":       100},
+        "CC7": [{"send": "CC70", "press_only": True}],   # direct, no release
+        "CC8": {"single": [{"send": "CC80", "value": 127}],
+                "double": [{"send": "CC81", "value": 127}]},
+        "CC10": {"single": [{"send": "CC90", "value": 127}]},
+    },
+    "tap": {
+        "PC2": [{"send": "BANK", "bank": "drums"}],
+        "PC5": [{"send": "CC1", "value": 127}],
+    },
+}
+
+
+def _landed(result):
+    """CC number the PC5 press produced: 13 looper, 0 drums, 1 tap."""
+    assert len(result) == 1
+    return result[0].ctrl
+
+
+class TestSnapback:
+
+    @pytest.fixture(autouse=True)
+    def _timers(self, fake_timer):
+        self.timers = fake_timer
+
+    def _bs(self, active_bank="looper"):
+        bs, captured = make_bankset(SNAPBACK_BANKS, active_bank=active_bank)
+        return bs, captured
+
+    @staticmethod
+    def _fire(bs):
+        """Fire the current snapback timer (as if it had woken up)."""
+        bs._snapback_timer.fire()
+
+    # -- filling the slot ------------------------------------------------
+
+    def test_timed_switch_fills_slot_and_starts_timer(self, clock):
+        bs, _ = self._bs()
+        bs.handle(make_pc(1))
+        assert bs.active_bank == "drums"
+        assert bs._snapback_bank == "looper"
+        assert bs._snapback_deadline == 1004.0
+        assert bs._snapback_timer.delay == 4.0
+
+    def test_plain_switch_leaves_slot_empty(self, clock):
+        bs, _ = self._bs()
+        bs.handle(make_pc(2))
+        assert bs.active_bank == "drums"
+        assert bs._snapback_bank is None
+        assert bs._snapback_timer is None
+
+    def test_rig_long_press_switch_fills_slot(self, clock):
+        """The rig's shape: looper CC0 long sends CC64 then a timed BANK,
+        fired from the long-press timer thread."""
+        bs, captured = make_bankset({
+            "looper": {
+                "CC0": {
+                    "single":  [{"send": "CC2", "value": 127}],
+                    "long":    [{"send": "CC64", "value": 127},
+                                {"send": "BANK", "bank": "drums-lst",
+                                 "snapback_after_ms": 4000}],
+                    "long_ms": 500,
+                },
+            },
+            "drums-lst": {},
+        }, active_bank="looper")
+        bs.handle(make_cc(0, value=127))
+        self.timers.active()[0].fire()          # long threshold reached
+        assert [e.ctrl for e in captured] == [64]
+        assert bs.active_bank == "drums-lst"
+        assert bs._snapback_bank == "looper"
+        # The suppressed release after the long press is not a new press.
+        assert bs.handle(make_cc(0, value=0)) == []
+        assert not bs._held_keys
+        clock.now = 1004.1
+        self._fire(bs)
+        assert bs.active_bank == "looper"
+
+    # -- the timer -------------------------------------------------------
+
+    def test_snaps_back_automatically_when_idle(self, clock):
+        bs, _ = self._bs()
+        bs.handle(make_pc(1))
+        clock.now = 1004.0
+        self._fire(bs)
+        assert bs.active_bank == "looper"
+        assert bs._snapback_bank is None
+        assert _landed(bs.handle(make_pc(5))) == 13
+
+    def test_snapback_updates_display(self, clock):
+        bs, _ = self._bs()
+        shown = []
+        bs._display_fn = lambda bset, bank, style: shown.append(bank)
+        bs.handle(make_pc(1))
+        clock.now = 1004.0
+        self._fire(bs)
+        assert shown == ["drums", "looper"]
+
+    def test_pedal_use_moves_deadline_timer_sleeps_again(self, clock):
+        bs, _ = self._bs()
+        bs.handle(make_pc(1))
+        clock.now = 1003.0
+        assert _landed(bs.handle(make_pc(5))) == 0
+        assert bs._snapback_deadline == 1007.0
+        clock.now = 1004.0
+        self._fire(bs)                          # wakes at the old deadline
+        assert bs.active_bank == "drums"
+        assert bs._snapback_timer.delay == pytest.approx(3.0)
+        clock.now = 1007.0
+        self._fire(bs)
+        assert bs.active_bank == "looper"
+
+    def test_mapped_release_moves_deadline(self, clock):
+        bs, _ = self._bs()
+        bs.handle(make_pc(1))
+        bs.handle(make_cc(4, value=127))
+        clock.now = 1003.0
+        bs.handle(make_cc(4, value=0))
+        assert bs._snapback_deadline == 1007.0
+
+    def test_unmapped_events_do_not_move_deadline(self, clock):
+        bs, _ = self._bs()
+        bs.handle(make_pc(1))
+        clock.now = 1003.0
+        assert bs.handle(make_cc(9, value=127)) is None   # passed through
+        bs.handle(make_cc(9, value=0))
+        assert bs._snapback_deadline == 1004.0
+        assert not bs._held_keys
+        clock.now = 1004.0
+        self._fire(bs)
+        assert bs.active_bank == "looper"
+
+    # -- held pedals -----------------------------------------------------
+
+    def _held_blocks(self, clock, press, release):
+        bs, _ = self._bs()
+        bs.handle(make_pc(1))
+        for ev in press:
+            bs.handle(ev)
+        clock.now = 1010.0
+        self._fire(bs)                          # deadline passed, but held
+        assert bs.active_bank == "drums"
+        assert bs._snapback_timer.delay == 0.25
+        for ev in release:
+            bs.handle(ev)                       # released at 1010
+        assert not bs._held_keys
+        self._fire(bs)                          # poll: deadline moved
+        assert bs.active_bank == "drums"
+        clock.now = 1014.0
+        self._fire(bs)
+        assert bs.active_bank == "looper"
+
+    def test_held_gesture_pedal_blocks_snapback(self, clock):
+        self._held_blocks(clock, [make_cc(1, value=127)],
+                          [make_cc(1, value=0)])
+
+    def test_held_direct_pedal_blocks_snapback(self, clock):
+        """A direct entry that forwards its release keeps the bank until
+        the release, so the release reaches the same mapping."""
+        self._held_blocks(clock, [make_cc(4, value=127)],
+                          [make_cc(4, value=0)])
+
+    def _not_held(self, clock, press):
+        """Presses whose mapping does not need the release are a moment
+        of use only: a pedal left down (or latched) does not hold the
+        bank."""
+        bs, _ = self._bs()
+        bs.handle(make_pc(1))
+        clock.now = 1001.0
+        for ev in press:
+            bs.handle(ev)
+        assert not bs._held_keys
+        assert bs._snapback_deadline == 1005.0  # still counted as use
+        clock.now = 1005.0
+        self._fire(bs)
+        assert bs.active_bank == "looper"
+
+    def test_chord_press_does_not_hold(self, clock):
+        self._not_held(clock, [make_cc(2, value=127), make_cc(3, value=127)])
+
+    def test_toggle_press_does_not_hold(self, clock):
+        self._not_held(clock, [make_cc(5, value=127)])
+
+    def test_press_only_direct_does_not_hold(self, clock):
+        self._not_held(clock, [make_cc(7, value=127)])
+
+    def test_multipress_gesture_does_not_hold(self, clock):
+        self._not_held(clock, [make_cc(8, value=127)])
+
+    def test_latching_pedal_on_toggle(self, clock):
+        """A latching pedal sends 127 on one press and 0 on the next; on a
+        toggle each one is just use, and the bank still snaps back."""
+        bs, _ = self._bs()
+        bs.handle(make_pc(1))
+        clock.now = 1001.0
+        bs.handle(make_cc(5, value=127))        # latched on
+        clock.now = 1002.0
+        bs.handle(make_cc(5, value=0))          # latched off
+        assert bs._snapback_deadline == 1006.0
+        clock.now = 1006.0
+        self._fire(bs)
+        assert bs.active_bank == "looper"
+
+    # -- non-momentary pedals -------------------------------------------
+    # Trigger-only: sends 127 on every press, never 0.
+    # Latching: sends 127 on one press and 0 on the next.
+
+    def _non_momentary(self, clock, values, ctrl):
+        """Send ``values`` on CC ``ctrl`` one second apart starting at
+        1001; the key never holds, every event counts as use, and the bank
+        snaps back the timeout after the last one."""
+        bs, _ = self._bs()
+        bs.handle(make_pc(1))
+        t = 1001.0
+        for v in values:
+            clock.now = t
+            bs.handle(make_cc(ctrl, value=v))
+            for timer in self.timers.active():  # let gesture windows close
+                if timer is not bs._snapback_timer:
+                    timer.fire()
+            assert not bs._held_keys
+            t += 1.0
+        last = t - 1.0
+        assert bs._snapback_deadline == last + 4.0
+        clock.now = last + 4.0
+        self._fire(bs)
+        assert bs.active_bank == "looper"
+
+    @pytest.mark.parametrize("ctrl", [5, 7, 8, 10],
+                             ids=["toggle", "press_only_direct",
+                                  "multipress_gesture", "single_gesture"])
+    def test_trigger_only_pedal(self, clock, ctrl):
+        self._non_momentary(clock, [127, 127, 127], ctrl)
+
+    @pytest.mark.parametrize("ctrl", [5, 7, 8, 10],
+                             ids=["toggle", "press_only_direct",
+                                  "multipress_gesture", "single_gesture"])
+    def test_latching_pedal(self, clock, ctrl):
+        self._non_momentary(clock, [127, 0, 127, 0], ctrl)
+
+    def test_trigger_only_chord(self, clock):
+        """Chord members pressed again without releases never hold."""
+        bs, _ = self._bs()
+        bs.handle(make_pc(1))
+        for t in (1001.0, 1002.0):
+            clock.now = t
+            bs.handle(make_cc(2, value=127))
+            bs.handle(make_cc(3, value=127))
+        assert not bs._held_keys
+        clock.now = 1006.0
+        self._fire(bs)
+        assert bs.active_bank == "looper"
+
+    def test_latching_pedal_on_release_forwarding_direct_holds(self, clock):
+        """On a direct entry that forwards releases, a latched-on pedal
+        holds the bank until it sends 0 (its 0 must reach this mapping)."""
+        bs, _ = self._bs()
+        bs.handle(make_pc(1))
+        bs.handle(make_cc(4, value=127))        # latched on
+        clock.now = 1100.0
+        self._fire(bs)
+        assert bs.active_bank == "drums"
+        bs.handle(make_cc(4, value=0))          # latched off at 1100
+        clock.now = 1103.9
+        self._fire(bs)                          # poll: deadline now 1104
+        assert bs.active_bank == "drums"
+        clock.now = 1104.0
+        self._fire(bs)
+        assert bs.active_bank == "looper"
+
+    def test_hold_keys_follow_mapping_needs(self, clock):
+        bs, _ = self._bs()
+        assert bs._hold_keys["drums"] == {"CC1", "CC4", "CC6"}
+        assert bs._hold_keys["looper"] == set()   # PC keys never hold
+
+    def test_holding_a_repeat_pedal_counts_as_activity(self, clock):
+        """Holding the tempo-repeat pedal keeps the drum bank however long
+        it is held; the idle time starts at the release."""
+        bs, captured = self._bs()
+        bs.handle(make_pc(1))
+        clock.now = 1001.0
+        bs.handle(make_cc(6, value=127))        # hold: repeats start
+        repeat = bs._gesture_repeat_timers["CC6"]
+        for _ in range(5):
+            repeat.fire()
+            repeat = bs._gesture_repeat_timers["CC6"]
+        assert [e.ctrl for e in captured] == [60] * 5
+        clock.now = 1020.0                      # held for 19 s
+        self._fire(bs)
+        assert bs.active_bank == "drums"
+        bs.handle(make_cc(6, value=0))          # release at 1020
+        clock.now = 1023.9
+        self._fire(bs)
+        assert bs.active_bank == "drums"
+        clock.now = 1024.0
+        self._fire(bs)
+        assert bs.active_bank == "looper"
+
+    def test_missed_release_cleared_by_next_press(self, clock):
+        """A key pressed in another bank whose release was lost is cleared
+        by its next press, even where the key is unmapped."""
+        bs, _ = self._bs()
+        bs.handle(make_pc(1))
+        bs.handle(make_cc(4, value=127))        # its release is lost
+        bs.handle(make_pc(3))                   # drums -> tap; CC4 unmapped
+        assert bs._held_keys == {"CC4"}
+        bs.handle(make_cc(4, value=127))
+        assert not bs._held_keys
+
+    def test_release_in_other_bank_clears_held(self, clock):
+        bs, _ = self._bs()
+        bs.handle(make_pc(1))
+        bs.handle(make_cc(4, value=127))
+        bs.handle(make_pc(3))                   # drums -> tap; CC4 unmapped
+        bs.handle(make_cc(4, value=0))
+        assert not bs._held_keys
+
+    # -- slot rules ------------------------------------------------------
+
+    def test_plain_switch_cancels_snapback(self, clock):
+        bs, _ = self._bs()
+        bs.handle(make_pc(1))                   # looper -> drums, timed
+        bs.handle(make_pc(3))                   # drums -> tap, plain
+        assert bs.active_bank == "tap"
+        assert bs._snapback_bank is None
+        clock.now = 1100.0
+        self._fire(bs)
+        assert bs.active_bank == "tap"
+
+    def test_plain_switch_away_and_back_stays_cancelled(self, clock):
+        """The rig case: looper -> drums-lst (timed) -> drums-tap -> back
+        to drums-lst by hand.  No snapback."""
+        bs, _ = self._bs()
+        bs.handle(make_pc(1))                   # looper -> drums, timed
+        bs.handle(make_pc(3))                   # drums -> tap, plain
+        bs.handle(make_pc(2))                   # tap -> drums, plain
+        assert bs.active_bank == "drums"
+        assert bs._snapback_bank is None
+        clock.now = 1100.0
+        self._fire(bs)
+        assert bs.active_bank == "drums"
+
+    def test_arriving_at_target_by_hand_empties_slot(self, clock):
+        bs, _ = self._bs()
+        bs.handle(make_pc(1))
+        timer = bs._snapback_timer
+        bs.handle(make_pc(4))                   # drums -> looper by hand
+        assert bs._snapback_bank is None
+        bs.handle(make_pc(2))                   # looper -> drums, plain
+        clock.now = 1010.0
+        timer.fire()                            # stale timer does nothing
+        assert bs.active_bank == "drums"
+
+    def test_second_timed_switch_keeps_target_new_timeout(self, clock):
+        bs, _ = self._bs()
+        bs.handle(make_pc(1))                   # looper -> drums, 4 s
+        first = bs._snapback_timer
+        clock.now = 1001.0
+        bs.handle(make_pc(1))                   # drums -> tap, 6 s
+        assert bs.active_bank == "tap"
+        assert bs._snapback_bank == "looper"
+        assert bs._snapback_deadline == 1007.0
+        assert bs._snapback_timer is not first
+        assert bs._snapback_timer.delay == 6.0
+        clock.now = 1005.0
+        first.fire()                            # old chain exits
+        assert bs.active_bank == "tap"
+        clock.now = 1007.0
+        self._fire(bs)
+        assert bs.active_bank == "looper"
+
+    def test_cancel_timers_empties_slot_and_stops_timer(self, clock):
+        bs, _ = self._bs()
+        bs.handle(make_pc(1))
+        timer = bs._snapback_timer
+        bs.cancel_timers()
+        assert bs._snapback_bank is None
+        assert timer.cancelled
+
+    # -- SNAPBACK_CANCEL -------------------------------------------------
+
+    def test_cancel_keeps_current_bank(self, clock):
+        bs, _ = self._bs()
+        bs.handle(make_pc(1))
+        clock.now = 1003.0
+        assert bs.handle(make_pc(6)) == []
+        assert bs._snapback_bank is None
+        clock.now = 1100.0
+        self._fire(bs)
+        assert bs.active_bank == "drums"
+
+    def test_cancel_with_empty_slot_is_harmless(self, clock):
+        bs, _ = self._bs(active_bank="drums")
+        assert bs.handle(make_pc(6)) == []
+        assert bs.active_bank == "drums"

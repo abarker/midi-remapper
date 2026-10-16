@@ -894,3 +894,46 @@ class TestEagerSingleValidation:
             },
             "other": {},
         })
+
+
+# ---------------------------------------------------------------------------
+# BANK snapback_after_ms (timed return)
+# ---------------------------------------------------------------------------
+
+class TestSnapbackAfterValidation:
+
+    @staticmethod
+    def _banks(ms, long_ms=500):
+        return {
+            "default": {
+                "CC0": {"single":  [{"send": "CC1", "value": 127}],
+                        "long":    [{"send": "BANK", "bank": "other",
+                                     "snapback_after_ms": ms}],
+                        "long_ms": long_ms},
+            },
+            "other": {},
+        }
+
+    def test_valid_timeout_clean(self):
+        assert_clean(self._banks(4000))
+
+    def test_minimum_is_allowed(self):
+        assert_clean(self._banks(2000))
+
+    def test_below_minimum_error(self):
+        assert_error(self._banks(1999), "must be at least 2000")
+
+    def test_not_longer_than_long_ms_error(self):
+        assert_error(self._banks(3000, long_ms=3000),
+                     "longer than the longest")
+
+    def test_bool_error(self):
+        assert_error(self._banks(True), "must be a number")
+
+    def test_string_error(self):
+        assert_error(self._banks("4000"), "must be a number")
+
+    def test_snapback_cancel_send_clean(self):
+        assert_clean({"default": {
+            "CC0": [{"send": "SNAPBACK_CANCEL"}],
+        }})

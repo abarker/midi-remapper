@@ -623,6 +623,70 @@ Bank switches can be combined with other sends in the same sequence::
         ],
     },
 
+**Snapback**
+
+Add ``"snapback_after_ms"`` to a ``"BANK"`` send to return automatically
+to the bank the switch was made from, once the pedals have been idle
+that long::
+
+    "CC0": {
+        "single":  [{"send": "CC2", "value": 127}],
+        "long":    [{"send": "BANK", "bank": "drums",
+                     "snapback_after_ms": 4000}],
+    },
+
+A long press here switches to ``drums``; 4 seconds after the last pedal
+use there, the remapper switches back by itself, and the bank display
+changes with it.  The same bank entered by a switch without the key
+stays put.
+
+- **Pedal use** is any press or release of a key mapped in the active
+  bank.  Each one restarts the countdown.  Events not mapped in the
+  active bank do not count.
+- **Held pedals.**  Where a mapping needs the release, a pedal held
+  down counts as in use until it is released, and the countdown starts
+  at the release.  So holding a ``"repeat"`` pedal never lets the bank
+  snap back under it.  See below for which mappings these are.
+- **One pending return at a time.**  Any switch without
+  ``"snapback_after_ms"`` cancels it: switching banks yourself picks
+  where you want to be.  A timed switch while a return is pending keeps
+  the original target and restarts the countdown with its own timeout.
+  A config reload also cancels it.
+- **Cancelling.**  ``{"send": "SNAPBACK_CANCEL"}`` cancels a pending
+  return and stays in the current bank.  With nothing pending it does
+  nothing.
+- **Timeout.**  At least 2000 ms, and longer than every ``long_ms``,
+  ``multi_ms`` and chord window in the BankSet, so no gesture is still
+  being decided when it runs out.  ``--validate`` checks this.  Choose a
+  timeout comfortably longer than your pauses between presses in that
+  bank: after a return, the next press is handled by the original bank.
+
+A pedal is held from its press (a CC above 0, or a NoteOn) to its
+release (CC 0, or a NoteOff), and only where its mapping in that bank
+needs the release:
+
+- a gesture with ``"long"`` or ``"repeat"``, which already requires a
+  momentary pedal;
+- a direct mapping that forwards the release (any item without
+  ``"press_only"``).  Holding it keeps the bank, so the release reaches
+  the same mapping.
+
+For every other mapping (toggles, gestures with only ``"single"``,
+``"double"`` or ``"triple"``, chords, direct mappings whose items are
+all ``"press_only"``, and Program Change, which has no release) each
+press and release is one moment of use, so latching pedals work with
+them as usual.  A latching or expression pedal on one of the two kinds
+above, left at a value above 0, holds the bank until it sends 0.
+
+.. important::
+
+   A pedal that never sends a release (127 on every press, never 0) must
+   not be on a direct mapping that forwards the release: its first press
+   would hold the bank for good, and it would never snap back.  Mark
+   that mapping's items ``"press_only": True``.  Nothing changes for the
+   pedal, since it has no releases to skip, and the remapper then knows
+   the release does not matter.
+
 Shell commands
 --------------
 
@@ -838,6 +902,7 @@ Each output in a sequence is a dict with the following keys:
 ``"send"`` *(required)*
     The event to send: ``"CC<n>"``, ``"PC<n>"``, or ``"NOTE<n>"`` -- or one
     of the special values ``"BANK"`` (switch banks; needs ``"bank"``),
+    ``"SNAPBACK_CANCEL"`` (cancel a pending snapback; no other keys),
     ``"CMD"`` (run a shell command; needs ``"cmd"``), ``"JACK_TRANSPORT"``
     (needs ``"transport"``) or ``"OSC"`` (needs ``"host"``, ``"port"``
     and ``"address"``).
@@ -853,7 +918,9 @@ Each output in a sequence is a dict with the following keys:
 
 ``"press_only"``
     If ``True``, skip this item on release events.  Only meaningful for
-    direct mappings.
+    direct mappings.  It also tells the snapback (see "Snapback" under
+    `Mapping types`_) that the release does not matter; set it on every
+    item for a pedal that never sends a release.
 
 ``"delay"``
     Seconds to wait before sending (default 0).  Values up to 1 ms
@@ -884,6 +951,11 @@ Each output in a sequence is a dict with the following keys:
 
 ``"bank"``
     Target bank name.  Required when ``"send"`` is ``"BANK"``.
+
+``"snapback_after_ms"``
+    Optional, ``"BANK"`` sends only.  Return to the bank the switch was
+    made from after this many milliseconds without pedal use; see
+    "Snapback" under `Mapping types`_.
 
 ``"cmd"``
     Shell command string.  Required when ``"send"`` is ``"CMD"``.

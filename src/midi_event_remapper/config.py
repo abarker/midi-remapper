@@ -202,7 +202,14 @@ Each sequence is a list of dicts.  Required key: "send".
     {"send": "PC<n>"}
     {"send": "NOTE<n>", "velocity": 127, "note_off": False}
     {"send": "BANK",    "bank": "drums"}
+    {"send": "BANK",    "bank": "drums", "snapback_after_ms": 4000}
+    {"send": "SNAPBACK_CANCEL"}
     {"send": "CMD",     "cmd": "jack_transport start", "delay": 0.0}
+
+"snapback_after_ms" returns to the bank the switch came from once mapped
+pedals have been idle that long (at least 2000, and longer than every
+gesture and chord window in the BankSet).  "SNAPBACK_CANCEL" cancels a
+pending return.  See "Snapback" in README.rst.
 
 Note: using "velocity" on a CC send or "value" on a NOTE send is caught
 by validate() at startup.
