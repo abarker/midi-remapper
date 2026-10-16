@@ -27,8 +27,8 @@ Installation
 
 The package is not on PyPI.  Clone the repository first::
 
-    git clone https://github.com/abarker/midiremapper.git
-    cd midiremapper
+    git clone https://github.com/abarker/midi-remapper.git
+    cd midi-remapper
 
 Installing into a virtual environment is recommended.  Create one inside
 the clone, or wherever you prefer, then activate it::
@@ -1271,8 +1271,8 @@ Development
 With the system libraries from `Installation`_ in place, clone and
 install in editable mode, then run the tests::
 
-    git clone https://github.com/abarker/midiremapper.git
-    cd midiremapper
+    git clone https://github.com/abarker/midi-remapper.git
+    cd midi-remapper
     pip install -e ".[dev]"
     pytest
 
