@@ -111,7 +111,9 @@ window, ``tkinter`` (usually part of Python; ``python3-tk`` on
 Debian/Ubuntu).
 
 **Platform.**  Developed and tested on Ubuntu 24.04; other Linux
-distributions should work the same way.  The community-maintained
+distributions should work the same way.  MIDI input and output use JACK
+MIDI ports; a controller that appears only as an ALSA MIDI device can be
+bridged into JACK with ``a2jmidid``.  The community-maintained
 ``mididings`` fork this project depends on
 (https://github.com/mididings/mididings) also lists macOS as supported,
 although that has not currently been tested here; mididings does not
