@@ -14,7 +14,7 @@ midi-remapper and they replace the built-in config.py BankSets:
     midi-remapper global.py actition.py
 
 Files are processed in order, so global.py would be checked first
-(matching the behaviour of the built-in global_banks + actition_banks).
+(matching the behavior of the built-in global_banks + actition_banks).
 
 FILE FORMAT
 -----------
@@ -64,7 +64,7 @@ fall back to the values in config.py:
     "data_offset"
     "_display" key          per-bank visual style for the display window,
                             placed inside each bank dict (not at the BankSet
-                            level).  Recognised keys: "bg", "fg", "font_size",
+                            level).  Recognized keys: "bg", "fg", "font_size",
                             "width", "height".  Omitted keys fall back to the
                             module defaults in bank_display.py.  Example:
                                 "banks": {
@@ -112,7 +112,7 @@ distinguishing it from a BankSet dict.  Example::
         {"name": "main", "banks": { ... }},
     ]
 
-Recognised global settings keys:
+Recognized global settings keys:
 
     "debug"     sets ``config.DEBUG`` (the dispatcher-level flag).
                 Hot-reloadable: changing it while the program runs takes
@@ -270,7 +270,7 @@ def load_bankset_file(path):
         if unknown:
             raise ValueError(
                 f"Config file {path}: unknown global settings key(s): "
-                f"{sorted(unknown)}.  Recognised: {sorted(_GLOBAL_SETTINGS_KEYS)}."
+                f"{sorted(unknown)}.  Recognized: {sorted(_GLOBAL_SETTINGS_KEYS)}."
             )
         settings = dict(settings_raw)
         items = data[1:]

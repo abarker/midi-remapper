@@ -142,10 +142,10 @@ class TestSendErrors:
             "PC5": [{"value": 64}],
         }}, "missing required 'send' key")
 
-    def test_unrecognised_send_prefix(self):
+    def test_unrecognized_send_prefix(self):
         assert_error({"default": {
             "PC5": [{"send": "XY42"}],
-        }}, "unrecognised send")
+        }}, "unrecognized send")
 
     def test_malformed_pc_send(self):
         assert_error({"default": {
@@ -397,8 +397,8 @@ class TestJackTransportValidation:
             ],
         }})
 
-    def test_jack_transport_not_flagged_as_unrecognised(self):
-        """JACK_TRANSPORT must not trigger the unrecognised-send error."""
+    def test_jack_transport_not_flagged_as_unrecognized(self):
+        """JACK_TRANSPORT must not trigger the unrecognized-send error."""
         assert_clean({"default": {
             "PC5": [{"send": "JACK_TRANSPORT", "transport": "stop"}],
         }})
@@ -652,7 +652,7 @@ class TestOscValidation:
         assert "port" in texts
         assert "'/'" in texts
 
-    def test_not_flagged_as_unrecognised(self):
+    def test_not_flagged_as_unrecognized(self):
         assert_clean({"default": {
             "PC5": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
                      "address": "/ok"}],

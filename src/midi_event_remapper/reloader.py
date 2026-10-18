@@ -6,7 +6,7 @@ Watches one or more ``.py`` config files for modification and reloads them
 on the fly while the program is running.  BankSet bank state (which bank is
 currently active) is preserved across reloads when the bank name still
 exists in the new config.  In-flight timers on the old BankSets are
-cancelled cleanly before they are discarded.
+canceled cleanly before they are discarded.
 
 The reloader polls file modification times at a configurable interval
 (default: 1 second) using ``os.stat()``, requiring no extra dependencies.
@@ -161,7 +161,7 @@ class ConfigReloader:
         Chooses the target bankset in priority order:
 
         1. The bankset whose name matches what is currently on screen (so
-           a reload that only changes colours stays on the same bankset).
+           a reload that only changes colors stays on the same bankset).
         2. The first bankset that has more than one bank (the "main"
            multi-bank controller mapping).
         3. The first bankset in the list.

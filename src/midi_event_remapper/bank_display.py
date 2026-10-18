@@ -17,7 +17,7 @@ and writes to the pipe.  The RT-facing side of the interface is unchanged:
 ``display.update()`` is still a bare ``deque.append()``, a single
 GIL-only C operation with no additional mutex.
 
-Exit behaviour
+Exit behavior
 --------------
 The display is **optional**.  Closing its window (or clicking Exit inside
 it) does *not* affect the main program -- the relay thread simply stops
@@ -138,7 +138,7 @@ class BankDisplay:
         bank_name    : str
         style        : dict or None
             Same visual-style dict as before (keys: bg, fg, font_size,
-            width, height).  Must be JSON-serialisable (str/int values),
+            width, height).  Must be JSON-serializable (str/int values),
             which all real style dicts already are.
         """
         self._deque.append((bankset_name, bank_name, style))

@@ -4,7 +4,7 @@ Pool of outgoing OSC clients for the ``OSC`` send type.
 
 One ``SimpleUDPClient`` is created per ``(host, port)`` target on first use
 and kept alive for the lifetime of the process.  All targets found in the
-config are pre-initialised during loading (via ``preinit``) so that UDP
+config are pre-initialized during loading (via ``preinit``) so that UDP
 socket creation does not occur at action time.
 
 Thread safety
@@ -23,7 +23,7 @@ python-osc argument conventions
 * a scalar          -- single typed argument (int / float / str / bytes)
 * a list            -- each element becomes one typed argument
 
-We normalise from the config ``"args"`` list accordingly:
+We normalize from the config ``"args"`` list accordingly:
 
 * ``[]`` / omitted  → ``None``   (no arguments)
 * ``[x]``           → ``x``      (single argument)

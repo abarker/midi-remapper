@@ -92,7 +92,7 @@ class TestEventKey:
         assert event_key(_pc_event(127)) == "PC127"
 
     def test_unknown_type_returns_none(self):
-        """An unrecognised event type returns None."""
+        """An unrecognized event type returns None."""
         ev = FakeInputEvent(0, port=1, channel=1)   # 0 is not CTRL/NOTEON/etc.
         assert event_key(ev) is None
 
@@ -249,7 +249,7 @@ class TestImplementationPath:
         if available:
             assert _CYTHON_CORE, (
                 "Cython extension is importable but _CYTHON_CORE is False. "
-                "The extension may have raised an error during initialisation."
+                "The extension may have raised an error during initialization."
             )
         else:
             assert not _CYTHON_CORE, (
@@ -305,7 +305,7 @@ class TestPhase2Architecture:
     These verify that:
     - The internal ``cdef nogil`` helpers (_classify_etype, _is_release_impl)
       are NOT accessible from Python (they are cdef, not cpdef or def).
-    - Classification is exhaustively correct for all recognised event types
+    - Classification is exhaustively correct for all recognized event types
       and for values at the boundaries that distinguish press from release.
     - Both implementations agree on every case (parametrized over both paths
       via the MIDI_REMAPPER_NO_CYTHON environment variable in CI).
@@ -330,7 +330,7 @@ class TestPhase2Architecture:
         )
 
     def test_classification_exhaustive(self):
-        """event_key returns the correct key for every recognised event type."""
+        """event_key returns the correct key for every recognized event type."""
         from midi_event_remapper.mock_mididings import FakeInputEvent, CTRL, NOTEON, NOTEOFF, PROGRAM
 
         cases = [

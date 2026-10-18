@@ -20,7 +20,7 @@ class TestChordKeyParsing:
     def test_two_keys(self):
         assert _parse_chord_key("CC1+CC2") == ("CC1", "CC2")
 
-    def test_order_normalised(self):
+    def test_order_normalized(self):
         # Keys are sorted so CC2+CC1 and CC1+CC2 produce the same tuple.
         assert _parse_chord_key("CC2+CC1") == _parse_chord_key("CC1+CC2")
 
@@ -279,7 +279,7 @@ class TestGlobalSettingsBlock:
         path.unlink()
 
     def test_settings_block_unknown_key_raises(self):
-        """An unrecognised key in a settings block raises ValueError."""
+        """An unrecognized key in a settings block raises ValueError."""
         content = '\n'.join([
             '[',
             '    {"debug": True, "typo_key": 99},',

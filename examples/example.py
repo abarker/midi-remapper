@@ -120,8 +120,8 @@
             # Visual style for the --display / --no-titlebar window.
             # "_display" is stripped before MIDI mapping lookup; it does not
             # interfere with any event key.  All keys are optional.
-            #   "bg"        -- background colour  (e.g. "#1a1a2e")
-            #   "fg"        -- text colour        (e.g. "#e0e0ff")
+            #   "bg"        -- background color  (e.g. "#1a1a2e")
+            #   "fg"        -- text color        (e.g. "#e0e0ff")
             #   "font_size" -- bank-name font size in points  (e.g. 72)
             #   "width"     -- window width in pixels         (e.g. 400)
             #   "height"    -- window height in pixels        (e.g. 200)

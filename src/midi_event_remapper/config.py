@@ -31,7 +31,7 @@ The ``--debug`` CLI flag sets both levels simultaneously.
 
 BANK / BANKSET SCHEMA
 ----------------------
-Each bank is a flat dict.  The value shape determines the behaviour:
+Each bank is a flat dict.  The value shape determines the behavior:
 
     List value               -> direct: fires immediately, no state
     Dict with a / b          -> toggle: alternates between two sequences
@@ -82,7 +82,7 @@ means the delay between the physical button press and the output event.
         Any key that is a member of a chord -- the press is held until
         either the chord completes or the window expires.
         Keys in fast chords (all CC/NOTE members) get near-zero latency
-        on fallback because the window is cancelled on release.
+        on fallback because the window is canceled on release.
         Keys in standard chords (any PC member) always wait the full
         CHORD_WINDOW_MS on fallback.
 
@@ -226,7 +226,7 @@ OUT_PORT    = 'out_0'
 
 
 # --------------------------------------------------------------------------
-# Global timing and behaviour constants
+# Global timing and behavior constants
 # --------------------------------------------------------------------------
 
 # DATA_OFFSET controls the numbering base for programs, ports, and channels.

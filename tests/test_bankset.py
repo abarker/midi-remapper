@@ -1,7 +1,7 @@
 """
 test_bankset.py
 
-Tests for BankSet event-handling behaviour: direct mappings, toggles,
+Tests for BankSet event-handling behavior: direct mappings, toggles,
 gestures (single/double/triple/long), chords, and bank switching.
 """
 import time
@@ -191,7 +191,7 @@ class TestGestureLong:
         assert result == []
 
     def test_quick_release_gives_single(self, fake_timer):
-        # Quick release: long timer cancelled, single fires via return value.
+        # Quick release: long timer canceled, single fires via return value.
         bs, _ = self._make(long_press_ms=300)
         bs.handle(make_cc(30, value=127))
         result = bs.handle(make_cc(30, value=0))
@@ -420,7 +420,7 @@ class TestGestureRepeat:
         assert len(out) == 1
         # A new repeat timer should now be pending in the BankSet state.
         assert "CC0" in bs._gesture_repeat_timers
-        assert not bs._gesture_repeat_timers["CC0"].cancelled
+        assert not bs._gesture_repeat_timers["CC0"].canceled
 
     def test_second_repeat_fires(self, fake_timer):
         bs, out = self._make()
@@ -436,7 +436,7 @@ class TestGestureRepeat:
         first = fake_timer.active()[0]
         first.fire()                        # first repeat fires
         bs.handle(make_cc(0, value=0))      # release
-        # The rescheduled repeat timer should be cancelled.
+        # The rescheduled repeat timer should be canceled.
         assert "CC0" not in bs._gesture_repeat_timers
         assert len(out) == 1  # only the one repeat that already fired
 
@@ -626,11 +626,11 @@ class TestChord:
         bs.handle(make_cc(2, value=0))
         assert out == []
 
-    def test_chord_timer_cancelled_on_completion(self, fake_timer):
+    def test_chord_timer_canceled_on_completion(self, fake_timer):
         bs, out = self._make()
         bs.handle(make_pc(4))
         bs.handle(make_pc(5))
-        assert all(t.cancelled for t in fake_timer.instances)
+        assert all(t.canceled for t in fake_timer.instances)
 
     def test_incomplete_chord_fallback_fires_individual(self, fake_timer):
         bs, out = self._make()
@@ -649,7 +649,7 @@ class TestChord:
 
     def test_overlapping_chords_no_spurious_fallback(self, fake_timer):
         # When two chords share a key and one completes, the other window
-        # should be cancelled without dispatching any fallback.
+        # should be canceled without dispatching any fallback.
         bs, out = make_bankset({
             "default": {
                 ("CC1", "CC2"): {"single": [{"send": "BANK", "bank": "drums"}]},
@@ -660,7 +660,7 @@ class TestChord:
         })
         bs.handle(make_cc(2, value=127))  # opens windows for both chords
         bs.handle(make_cc(1, value=127))  # completes ("CC1","CC2")
-        # ("CC2","CC3") window should be cancelled, no fallback
+        # ("CC2","CC3") window should be canceled, no fallback
         for t in fake_timer.active():
             t.fire()
         assert out == []
@@ -1703,9 +1703,9 @@ class TestOscSend:
 
 class TestEagerSingle:
     """
-    Behavioural tests for the eager_single flag (§4 of EAGER_SINGLE_PLAN).
+    Behavioral tests for the eager_single flag (§4 of EAGER_SINGLE_PLAN).
 
-    Scenarios follow the plan's behaviour walkthrough exactly:
+    Scenarios follow the plan's behavior walkthrough exactly:
     single fires at press time; long/double/repeat fire in addition,
     never re-firing single.
     """
@@ -1858,12 +1858,12 @@ class TestEagerSingle:
             },
         }})
         result = bs.handle(make_cc(5, value=127))
-        # single-only fast path fires before eager block; behaviour unchanged
+        # single-only fast path fires before eager block; behavior unchanged
         assert len(result) == 1
         assert result[0].ctrl == 10
 
     # ------------------------------------------------------------------
-    # Entry without eager_single: no behaviour change
+    # Entry without eager_single: no behavior change
     # ------------------------------------------------------------------
 
     def test_without_flag_single_deferred_to_release(self, fake_timer):
@@ -1885,7 +1885,7 @@ class TestEagerSingle:
 # ---------------------------------------------------------------------------
 
 class TestDelayThreshold:
-    """Verify _IMMEDIATE_DELAY_S behaviour: zero and sub-threshold delays are
+    """Verify _IMMEDIATE_DELAY_S behavior: zero and sub-threshold delays are
     sent synchronously; above-threshold delays go through the timer path."""
 
     def test_zero_delay_is_immediate(self):
@@ -2475,7 +2475,7 @@ class TestSnapback:
         self._fire(bs)
         assert bs.active_bank == "tap"
 
-    def test_plain_switch_away_and_back_stays_cancelled(self, clock):
+    def test_plain_switch_away_and_back_stays_canceled(self, clock):
         """The rig case: looper -> drums-lst (timed) -> drums-tap -> back
         to drums-lst by hand.  No snapback."""
         bs, _ = self._bs()
@@ -2523,7 +2523,7 @@ class TestSnapback:
         timer = bs._snapback_timer
         bs.cancel_timers()
         assert bs._snapback_bank is None
-        assert timer.cancelled
+        assert timer.canceled
 
     # -- SNAPBACK_CANCEL -------------------------------------------------
 

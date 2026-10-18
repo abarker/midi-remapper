@@ -47,22 +47,22 @@ class FakeTimer:
         self.delay     = delay
         self.fn        = fn
         self.args      = args
-        self.cancelled = False
+        self.canceled = False
         FakeTimer.instances.append(self)
 
     def start(self):
         pass  # no-op: tests fire manually
 
     def cancel(self):
-        self.cancelled = True
+        self.canceled = True
 
     def fire(self):
-        if not self.cancelled:
+        if not self.canceled:
             self.fn(*self.args)
             self._fired = True
 
     def is_alive(self):
-        return not self.cancelled and not getattr(self, '_fired', False)
+        return not self.canceled and not getattr(self, '_fired', False)
 
     @classmethod
     def clear(cls):
@@ -70,8 +70,8 @@ class FakeTimer:
 
     @classmethod
     def active(cls):
-        """Return all timers that have not been cancelled."""
-        return [t for t in cls.instances if not t.cancelled]
+        """Return all timers that have not been canceled."""
+        return [t for t in cls.instances if not t.canceled]
 
 
 @pytest.fixture

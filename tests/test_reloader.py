@@ -78,7 +78,7 @@ class TestCancelTimers:
         bs.handle(make_cc(1, value=127))
         assert len(fake_timer.active()) > 0
         bs.cancel_timers()
-        assert all(t.cancelled for t in fake_timer.instances)
+        assert all(t.canceled for t in fake_timer.instances)
 
     def test_cancel_long_timer(self, fake_timer):
         bs, _ = make_bankset({
@@ -92,7 +92,7 @@ class TestCancelTimers:
         bs.handle(make_cc(1, value=127))
         assert len(fake_timer.active()) > 0
         bs.cancel_timers()
-        assert all(t.cancelled for t in fake_timer.instances)
+        assert all(t.canceled for t in fake_timer.instances)
 
     def test_cancel_clears_timer_list(self, fake_timer):
         bs, _ = make_bankset({
@@ -269,7 +269,7 @@ class TestReloadCycle:
         assert gcfg.BANK_SETS[0] is bs
         path.unlink()
 
-    def test_old_timers_cancelled_on_reload(self, fake_timer):
+    def test_old_timers_canceled_on_reload(self, fake_timer):
         path = make_temp_config(simple_config_text())
         bs, _ = make_bankset({
             "default": {
@@ -287,8 +287,8 @@ class TestReloadCycle:
         gcfg.BANK_SETS = [bs]
         rl._reload([path])
 
-        # All original timers should now be cancelled.
-        assert all(t.cancelled for t in fake_timer.instances)
+        # All original timers should now be canceled.
+        assert all(t.canceled for t in fake_timer.instances)
         path.unlink()
 
 
@@ -617,7 +617,7 @@ class TestWatcherRobustness:
             rl.stop()
             path.unlink()
 
-    def test_cancelled_bankset_does_not_emit_on_delayed_send(self, fake_timer):
+    def test_canceled_bankset_does_not_emit_on_delayed_send(self, fake_timer):
         """A delayed-send timer that fires after cancel_timers must not emit."""
         bs, captured = make_bankset({
             "default": {

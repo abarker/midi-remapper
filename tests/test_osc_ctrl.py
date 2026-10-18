@@ -8,7 +8,7 @@ replaced with a lightweight recording stub injected into ``sys.modules``
 before any call that would trigger the lazy import inside ``_get_client``.
 
 What these tests cover that the bankset-level mock tests (TestOscSend) do not:
-- Arg normalisation: [] -> None, [x] -> scalar, [x,y,...] -> list
+- Arg normalization: [] -> None, [x] -> scalar, [x,y,...] -> list
 - Client pooling: same (host, port) returns the same object
 - Separate targets get separate clients
 - preinit() silently swallows exceptions (e.g. pythonosc not installed)
@@ -62,10 +62,10 @@ def fake_pythonosc(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Arg normalisation
+# Arg normalization
 # ---------------------------------------------------------------------------
 
-class TestArgNormalisation:
+class TestArgNormalization:
     """osc_ctrl.send() must convert args list to the form python-osc expects."""
 
     def test_empty_args_sends_none(self, fake_pythonosc):

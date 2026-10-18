@@ -88,7 +88,7 @@ def _parse_transport_cmd(s):
         ('start',)
         ('stop',)
         ('locate', frame_int)
-    Returns None if the string is not a recognised command.
+    Returns None if the string is not a recognized command.
     """
     s = s.strip()
     if s == "start":
@@ -111,7 +111,7 @@ class BankSet:
     A named collection of banks.  One bank is active at a time.
 
     Each bank is a dict mapping event keys (strings or tuples of strings)
-    to behaviour definitions.  The behaviour type is inferred from the
+    to behavior definitions.  The behavior type is inferred from the
     shape of the value:
 
         List value               -> direct: fires immediately, no state
@@ -651,7 +651,7 @@ class BankSet:
                         errors.append(f"{ctx}[{i}]: malformed send {send!r}")
                 elif send not in ("SYSEX", "CMD", "JACK_TRANSPORT", "OSC"):
                     errors.append(
-                        f"{ctx}[{i}]: unrecognised send {send!r}"
+                        f"{ctx}[{i}]: unrecognized send {send!r}"
                     )
 
         def check_trigger_value(tv, ctx):
@@ -942,7 +942,7 @@ class BankSet:
                             k, []
                         ).append(fk)
 
-        # Pre-initialise external clients for JACK_TRANSPORT and OSC sends
+        # Pre-initialize external clients for JACK_TRANSPORT and OSC sends
         # found in this config.  Done here (loading time, main thread) so
         # connection overhead does not occur mid-session.  Each block is
         # wrapped in try/except so --validate and test runs (where neither
@@ -1004,7 +1004,7 @@ class BankSet:
         return False
 
     def _classify(self, key, value):
-        """Infer the behaviour type of a bank entry from its shape."""
+        """Infer the behavior type of a bank entry from its shape."""
         if isinstance(key, tuple):
             return "chord"
         if isinstance(value, list):
@@ -1044,7 +1044,7 @@ class BankSet:
                     # A plain switch is a deliberate choice of bank: it
                     # cancels any pending snapback.
                     if self._debug:
-                        print(f"[snapback:{self.name}] cancelled by switch "
+                        print(f"[snapback:{self.name}] canceled by switch "
                               f"to {item['bank']!r}")
                     self._clear_snapback()
                 self.switch_bank(item["bank"])
@@ -1052,7 +1052,7 @@ class BankSet:
 
             if send == "SNAPBACK_CANCEL":
                 if self._debug and self._snapback_bank is not None:
-                    print(f"[snapback:{self.name}] cancelled, staying in "
+                    print(f"[snapback:{self.name}] canceled, staying in "
                           f"{self.active_bank!r}")
                 self._clear_snapback()
                 continue
@@ -1209,7 +1209,7 @@ class BankSet:
         """Send an OSC message via the persistent client pool.
 
         Runs in a daemon thread so it does not block the mididings
-        callback.  Uses the pre-initialised ``osc_ctrl`` client for the
+        callback.  Uses the pre-initialized ``osc_ctrl`` client for the
         target ``(host, port)`` pair; the UDP send itself is a single
         non-blocking syscall.
         """
@@ -1740,7 +1740,7 @@ class BankSet:
 
         Fast chords require all members to send a release signal (CC=0 or
         NoteOff).  When any member's release arrives before the chord is
-        complete, the window is cancelled immediately and the fallback
+        complete, the window is canceled immediately and the fallback
         individual dispatch fires with near-zero latency.
         """
         return all(k.startswith("CC") or k.startswith("NOTE") for k in fk)
@@ -1783,7 +1783,7 @@ class BankSet:
                     other["timer"].cancel()
                     if self._debug:
                         print(
-                            f"[chord:{self.name}] fast dismissal cancelled "
+                            f"[chord:{self.name}] fast dismissal canceled "
                             f"overlapping window {set(other_fk)}"
                         )
 
@@ -1895,7 +1895,7 @@ class BankSet:
                                         )
                                 if self._debug:
                                     print(
-                                        f"[chord:{self.name}] expiry cancelled "
+                                        f"[chord:{self.name}] expiry canceled "
                                         f"overlapping window {set(other_fk)}"
                                     )
                         bank_ = self.banks[self.active_bank]
@@ -1951,7 +1951,7 @@ class BankSet:
                             other["timer"].cancel()
                             if self._debug:
                                 print(
-                                    f"[chord:{self.name}] cancelled "
+                                    f"[chord:{self.name}] canceled "
                                     f"overlapping window {set(other_fk)}"
                                 )
 

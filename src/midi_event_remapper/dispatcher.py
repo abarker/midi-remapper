@@ -94,7 +94,7 @@ def main_handler(event):
     unchanged.
 
     Exceptions are caught and printed rather than propagated into the
-    mididings event loop, where the behaviour on an unhandled exception
+    mididings event loop, where the behavior on an unhandled exception
     is undefined and could silently stop all MIDI output.
 
     Debug output at this level is gated on ``config.DEBUG`` (the global
