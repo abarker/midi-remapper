@@ -391,7 +391,7 @@ List available banks::
 
 Event key names are case-insensitive: ``"cc5"`` is equivalent to
 ``"CC5"``, and ``"note60"`` to ``"NOTE60"``.  Chord components are
-normalised individually, so ``"cc1+cc2"`` is the same as ``"CC1+CC2"``.
+normalized individually, so ``"cc1+cc2"`` is the same as ``"CC1+CC2"``.
 Uppercase is conventional in examples and documentation.
 
 Mapping types
@@ -411,7 +411,7 @@ suppress the release::
 
    **Gesture entries never emit a release message** -- unlike the direct
    form above.  The source key's release is consumed; nothing mirroring
-   the key going up is ever sent.  Every output comes from a labelled
+   the key going up is ever sent.  Every output comes from a labeled
    sequence (``single``, ``long``, ``double``, ``triple``, ``repeat``),
    carrying that sequence's own value.
 
@@ -566,7 +566,7 @@ secondary action::
         "double": [{"send": "CC20", "value": 127}],
     },
 
-Behaviour: on each first press, ``"single"`` fires immediately and is then
+Behavior: on each first press, ``"single"`` fires immediately and is then
 forgotten.  ``"long"`` / ``"double"`` / ``"triple"`` / ``"repeat"`` still
 resolve at their normal times and fire in addition, never re-firing
 ``"single"``: the later presses of a double or triple do not fire it
@@ -654,7 +654,7 @@ stays put.
   where you want to be.  A timed switch while a return is pending keeps
   the original target and restarts the countdown with its own timeout.
   A config reload also cancels it.
-- **Cancelling.**  ``{"send": "SNAPBACK_CANCEL"}`` cancels a pending
+- **Canceling.**  ``{"send": "SNAPBACK_CANCEL"}`` cancels a pending
   return and stays in the current bank.  With nothing pending it does
   nothing.
 - **Timeout.**  At least 2000 ms, and longer than every ``long_ms``,
@@ -991,7 +991,7 @@ Each output in a sequence is a dict with the following keys:
 Entry keys
 ----------
 
-Besides the labelled sequences (``"single"``, ``"double"``, ``"triple"``,
+Besides the labeled sequences (``"single"``, ``"double"``, ``"triple"``,
 ``"long"``, ``"repeat"``, and ``"a"``/``"b"`` for toggles), an entry dict
 may hold these keys:
 
@@ -1130,7 +1130,7 @@ is ``actition``, the name one config gives to the BankSet holding the
 mappings for its ActitioN footswitch.  When a config has several BankSets,
 the window shows whichever one last switched banks (at startup, the first
 BankSet that has more than one bank or starts on a bank other than
-``"default"``).  The colours come from each bank's
+``"default"``).  The colors come from each bank's
 ``"_display"`` style (see *Per-bank styling* below).
 
 .. figure:: screenshots/bank-display-drums.png
@@ -1149,7 +1149,7 @@ BankSet that has more than one bank or starts on a bank other than
 
 **Per-bank styling**
 
-Each bank can define its own background colour, text colour, font size,
+Each bank can define its own background color, text color, font size,
 and window dimensions via a ``"_display"`` key placed directly inside the
 bank dict in the config file::
 
@@ -1179,8 +1179,8 @@ Available style keys:
 ==================  ===========================================
 Key                 Effect
 ==================  ===========================================
-``bg``              Background colour (any Tk colour string)
-``fg``              Text colour
+``bg``              Background color (any Tk color string)
+``fg``              Text color
 ``font_size``       Bank-name font size in points
 ``width``           Window width in pixels
 ``height``          Window height in pixels
