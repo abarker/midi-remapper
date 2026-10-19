@@ -346,6 +346,20 @@ Command-line reference
     are scheduled by time, not by an input event, and still go out at the
     start of a period.  JACK backends only.
 
+    **What to expect.**  Subtle.  The scatter it removes is at most one
+    period, a different amount for each press (5.3 ms at 256 frames, 2.7
+    ms on average; it scales with the period, so 10.7 ms at 512), and
+    human press timing varies more than that.  With sync off in the forked
+    SooperLooper it shows in loop length: the start and stop presses each
+    shift by their own amount, so a loop comes out up to one period too
+    long or too short.  That is inaudible at the loop point, but it adds up
+    over repeats against something steady, such as free-running drums (2
+    ms per cycle is 20 ms after ten).  With the option, the length follows
+    the presses.  With sync on, Record and Mute act on the beat either
+    way, so expect no audible difference, apart from a press at the very
+    edge of a late-hit window.  Watch JACK's xrun count when you first use
+    it.
+
     **WARNING:** mididings does not expose an event's sample time to
     Python.  This option uses two undocumented functions from its internal
     ``_mididings`` module (``midi_event_to_buffer`` and
