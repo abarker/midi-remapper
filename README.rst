@@ -265,18 +265,31 @@ Command-line reference
 
     **Timing within the buffer**
 
-    By default, remapped events do not keep their position within the JACK
-    buffer (their sample offset): each one is built new, without the
-    incoming event's position, so it goes out at the start of a buffer.  With
-    ``jack-rt`` that is the start of the same period, so a command arrives
-    up to one period early (0 to 5.3 ms at 256 frames / 48 kHz, 2.7 ms on
-    average); with the buffered backend it is the start of the next period,
-    so 0 to 5.3 ms late.  A receiver that places JACK MIDI events at their
-    exact sample, such as the forked SooperLooper's ``midi_in`` port,
-    therefore sees up to one period of timing scatter.  Stock SooperLooper
-    (ALSA MIDI only) starts commands at the beginning of a buffer anyway,
-    and ``jack-rt`` still saves the period.  The experimental
-    ``--keep-offsets`` option, below, removes the scatter.
+    JACK handles audio and MIDI a period at a time (256 frames is 5.3 ms
+    at 48 kHz).  Each incoming MIDI event carries a time stamp: the sample
+    position within the period at which JACK received it (its *sample
+    offset*).  In this section, "early", "late" and "exact" are relative
+    to that stamp, on JACK's timeline.  They are not relative to the
+    physical button press, which always comes first: JACK processes a
+    period after its audio and MIDI have arrived, so nothing can go out
+    before the press.
+
+    With ``jack-rt`` the remapper handles a period's events inside that
+    same JACK cycle, before the program it feeds runs, so its output lands
+    in the same period as the input.  By default, though, a remapped event
+    does not keep the input's offset: it is built new, so it is placed at
+    the start of the period.  The receiver then treats the command as if
+    it had arrived up to one period before its stamp (0 to 5.3 ms, 2.7 ms
+    on average): that is what "early" means here.  With the buffered
+    backend the handler runs outside the JACK cycle, so the output goes
+    into the next period, again at its start: 0 to 5.3 ms late.
+
+    A receiver that places JACK MIDI events at their exact sample, such as
+    the forked SooperLooper's ``midi_in`` port, therefore sees up to one
+    period of timing scatter.  Stock SooperLooper (ALSA MIDI only) starts
+    commands at the beginning of a period anyway, and ``jack-rt`` still
+    saves the period.  The experimental ``--keep-offsets`` option, below,
+    removes the scatter.
 
     Also calls ``sys.setswitchinterval(0.0001)`` to reduce the chance
     that the Python GIL is held by another thread when the JACK callback
@@ -300,19 +313,29 @@ Command-line reference
     the Cython extension (see `Optional Cython extension`_) and compare again.
 
 ``--keep-offsets``
-    **Experimental.**  Sends each remapped event at its input's position
-    within the JACK period (its sample offset) instead of the start of the
-    period:
+    **Experimental.**  Places each remapped event at its input's time
+    stamp (its sample offset within the JACK period, see "Timing within
+    the buffer" under ``--jack-rt``) instead of at the start of the period:
 
-    - with ``--jack-rt``, a remapped command arrives at the exact sample it
-      was played;
-    - with the default buffered backend, exactly one period later, without
-      the scatter of up to one period described under ``--jack-rt``.
+    - with ``--jack-rt``, the receiver gets the remapped command at the
+      same sample position at which the remapper received the input.  The
+      remapper then adds no delay and no scatter on JACK's timeline.  It
+      cannot come out later than the input's stamp, as long as the handler
+      finishes within the JACK cycle (if it doesn't, JACK reports an
+      xrun).
+    - with the default buffered backend, at the same position exactly one
+      period later, without the scatter of up to one period.
 
-    Measured on a dummy JACK server at 256 frames: without the option,
-    events sent at offsets 0 to 255 came out 0 to 255 samples early with
-    ``--jack-rt`` (1 to 256 late with the buffered backend); with it, all
-    came out at their own offset, exactly on time (exactly 256 late).
+    It doesn't change anything before the stamp: the time from the
+    physical press to JACK receiving it (MIDI interface, driver) is
+    outside the remapper.
+
+    Measured on a dummy JACK server at 256 frames, with events stamped at
+    offsets 0 to 255.  Without the option, the outputs were placed 0 to
+    255 samples before their stamps with ``--jack-rt`` (1 to 256 after,
+    with the buffered backend).  With it, every output was placed at its
+    own stamp with ``--jack-rt`` (exactly 256 after, with the buffered
+    backend).
 
     It only matters to a receiver that places JACK MIDI events at their
     exact sample, such as the forked SooperLooper's JACK MIDI input; with
