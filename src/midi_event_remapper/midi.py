@@ -125,3 +125,75 @@ if not _CYTHON_CORE:
             return SysExEvent(port, bytes(sx) if isinstance(sx, list) else sx)
         else:
             raise ValueError(f"build_event: unhandled send value {send!r}")
+
+
+# ---------------------------------------------------------------------------
+# --keep-offsets (experimental, off by default): keep each remapped event
+# at its input's position within the JACK period.
+#
+# mididings keeps each event's frame (its sample time) on the C++ event and
+# writes an output event at the frame it carries, but does not expose the
+# frame to Python, and events built in Python (build_event above) have
+# frame 0, so they go out at the start of the period.  Two functions in
+# mididings' extension module carry the frame: midi_event_to_buffer(ev)
+# returns (bytes, port, frame), and buffer_to_midi_event(bytes, port,
+# frame) builds an event with it.  They are undocumented, though mididings'
+# own engine.py uses them, so enable_keep_offsets() checks that they exist
+# and round-trip a frame before anything relies on them.  The event they
+# build is the plain extension type; mididings' Process() calls
+# _finalize() on every returned event, so with_frame() gives it the full
+# mididings.event.MidiEvent class the same way mididings itself does for
+# incoming events (``ev.__class__ = MidiEvent`` in units/call.py).
+# ---------------------------------------------------------------------------
+KEEP_OFFSETS = False
+_to_buffer   = None
+_from_buffer = None
+_event_class = None
+
+
+def enable_keep_offsets(backend):
+    """Turn on --keep-offsets.  Returns None on success, otherwise the
+    reason it stays off (the remapper then runs exactly as without it)."""
+    global KEEP_OFFSETS, _to_buffer, _from_buffer, _event_class
+    if backend not in ("jack", "jack-rt"):
+        return f"only the JACK backends have sample offsets (backend: {backend})"
+    try:
+        import _mididings as mod
+    except ImportError:
+        return "mididings' _mididings extension module was not found"
+    to_buffer   = getattr(mod, "midi_event_to_buffer", None)
+    from_buffer = getattr(mod, "buffer_to_midi_event", None)
+    if to_buffer is None or from_buffer is None:
+        return ("this mididings has no midi_event_to_buffer / "
+                "buffer_to_midi_event")
+    import importlib
+    event_class = getattr(importlib.import_module("mididings.event"),
+                          "MidiEvent", None)
+    if event_class is None:
+        return "this mididings has no mididings.event.MidiEvent"
+    try:
+        data, port, _ = to_buffer(CtrlEvent(1, 2, 3, 4))
+        moved = from_buffer(bytes(data), port, 123457)
+        moved.__class__ = event_class
+        moved._finalize()          # what Process() does to each output
+        back = to_buffer(moved)
+        if (list(back[0]), back[1], back[2]) != (list(data), port, 123457):
+            return f"self-test failed: got {back!r}"
+    except Exception as e:  # noqa: BLE001 -- any failure means "stay off"
+        return f"self-test failed: {e!r}"
+    _to_buffer, _from_buffer, _event_class = to_buffer, from_buffer, event_class
+    KEEP_OFFSETS = True
+    return None
+
+
+def frame_of(event):
+    """The frame (sample time) an incoming event carries."""
+    return _to_buffer(event)[2]
+
+
+def with_frame(event, frame):
+    """A copy of an output event that carries the given frame."""
+    data, port, _ = _to_buffer(event)
+    moved = _from_buffer(bytes(data), port, frame)
+    moved.__class__ = _event_class
+    return moved

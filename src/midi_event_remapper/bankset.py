@@ -14,6 +14,7 @@ import threading
 import time
 
 from midi_event_remapper.midi import build_event, event_key, is_release
+from midi_event_remapper import midi as _midi
 from midi_event_remapper.config import urgent_print
 
 # Delays at or below this threshold are sent synchronously rather than
@@ -1032,6 +1033,10 @@ class BankSet:
         Returns a list (possibly empty -- empty means "handled, emit nothing").
         """
         immediate = []
+        # --keep-offsets: immediate outputs carry the input's frame, so they
+        # go out at its position in the JACK period (see midi.py).
+        frame = (_midi.frame_of(event)
+                 if _midi.KEEP_OFFSETS and event is not None else None)
         for item in seq:
             send  = item.get("send", "")
             delay = float(item.get("delay", 0.0))
@@ -1105,7 +1110,8 @@ class BankSet:
             )
 
             if delay <= _IMMEDIATE_DELAY_S:
-                immediate.append(ev_out)
+                immediate.append(ev_out if frame is None
+                                 else _midi.with_frame(ev_out, frame))
                 if self._debug:
                     print(f"  [seq] -> immediate: {ev_out}")
             else:

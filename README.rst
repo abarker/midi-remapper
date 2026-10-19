@@ -265,9 +265,9 @@ Command-line reference
 
     **Timing within the buffer**
 
-    Remapped events do not yet keep their position within the JACK buffer
-    (their sample offset): each one is built new, without the incoming
-    event's position, so it goes out at the start of a buffer.  With
+    By default, remapped events do not keep their position within the JACK
+    buffer (their sample offset): each one is built new, without the
+    incoming event's position, so it goes out at the start of a buffer.  With
     ``jack-rt`` that is the start of the same period, so a command arrives
     up to one period early (0 to 5.3 ms at 256 frames / 48 kHz, 2.7 ms on
     average); with the buffered backend it is the start of the next period,
@@ -275,7 +275,8 @@ Command-line reference
     exact sample, such as the forked SooperLooper's ``midi_in`` port,
     therefore sees up to one period of timing scatter.  Stock SooperLooper
     (ALSA MIDI only) starts commands at the beginning of a buffer anyway,
-    and ``jack-rt`` still saves the period.
+    and ``jack-rt`` still saves the period.  The experimental
+    ``--keep-offsets`` option, below, removes the scatter.
 
     Also calls ``sys.setswitchinterval(0.0001)`` to reduce the chance
     that the Python GIL is held by another thread when the JACK callback
@@ -297,6 +298,41 @@ Command-line reference
     (QjackCtl shows it) over a session or two with and without
     ``--jack-rt``.  If it goes up, go back to the default backend, or try
     the Cython extension (see `Optional Cython extension`_) and compare again.
+
+``--keep-offsets``
+    **Experimental.**  Sends each remapped event at its input's position
+    within the JACK period (its sample offset) instead of the start of the
+    period:
+
+    - with ``--jack-rt``, a remapped command arrives at the exact sample it
+      was played;
+    - with the default buffered backend, exactly one period later, without
+      the scatter of up to one period described under ``--jack-rt``.
+
+    Measured on a dummy JACK server at 256 frames: without the option,
+    events sent at offsets 0 to 255 came out 0 to 255 samples early with
+    ``--jack-rt`` (1 to 256 late with the buffered backend); with it, all
+    came out at their own offset, exactly on time (exactly 256 late).
+
+    It only matters to a receiver that places JACK MIDI events at their
+    exact sample, such as the forked SooperLooper's JACK MIDI input; with
+    sync off there, a loop's length then follows the presses to the sample.
+    It applies to outputs sent immediately.  Delayed sends and timed
+    gesture outputs (``"double"``, ``"long"``, ``"repeat"``, chord
+    fallback, and a ``"single"`` that waits for the multi-press window)
+    are scheduled by time, not by an input event, and still go out at the
+    start of a period.  JACK backends only.
+
+    **WARNING:** mididings does not expose an event's sample time to
+    Python.  This option uses two undocumented functions from its internal
+    ``_mididings`` module (``midi_event_to_buffer`` and
+    ``buffer_to_midi_event``, which mididings' own ``engine.py`` also
+    uses) to read the input's sample time and give it to each output.  A
+    future mididings could change them.  At startup the option checks
+    that they exist and round-trips a test event through them, the same
+    way the handler will; if anything fails, it prints a warning, turns
+    itself off, and the remapper runs exactly as without it.  It adds two
+    small calls per remapped event in the MIDI handler.
 
 ``--client-name NAME``
     Override the JACK client name for this session (default: ``CLIENT_NAME``

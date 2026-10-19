@@ -44,6 +44,9 @@ Disable live config reloading:
 Use the jack-rt backend (one JACK period less latency; watch for xruns):
     midi-remapper actition.py --jack-rt
 
+Also keep remapped events at their input's exact sample (experimental):
+    midi-remapper actition.py --jack-rt --keep-offsets
+
 Override the JACK client name (e.g. when running two instances):
     midi-remapper actition.py --client-name midi_remapper_2
 """
@@ -219,6 +222,30 @@ def build_parser():
             "xruns in all JACK clients; watch the xrun count after "
             "switching, and go back to the default if it rises.  Also calls "
             "sys.setswitchinterval(0.0001) to reduce GIL contention."
+        ),
+    )
+
+    parser.add_argument(
+        "--keep-offsets",
+        action  = "store_true",
+        dest    = "keep_offsets",
+        help    = (
+            "EXPERIMENTAL.  Send each remapped event at its input's "
+            "position within the JACK period (its sample offset) instead "
+            "of the start of the period.  With --jack-rt a remapped "
+            "command then arrives at the exact sample it was played; with "
+            "the buffered backend exactly one period later, without the "
+            "scatter of up to one period.  It only matters to receivers "
+            "that place JACK MIDI events at their exact sample, such as "
+            "the forked SooperLooper's JACK MIDI input.  Applies to outputs "
+            "sent immediately; delayed sends and timed gesture outputs "
+            "(double, long, repeat, chord fallback) still go at the start "
+            "of a period.  WARNING: uses two undocumented functions in "
+            "mididings' internal _mididings module.  If they are missing "
+            "or fail a startup self-test, the option turns itself off with "
+            "a warning and the remapper runs as without it.  JACK backends "
+            "only.  Adds two small calls per remapped event in the MIDI "
+            "handler."
         ),
     )
 
@@ -433,6 +460,25 @@ def main():
             "  WARNING: slow or blocking Python may cause xruns in all\n"
             "  JACK clients.  Keep the handler lean.\n"
         )
+
+    # --keep-offsets needs the backend chosen above.  Off unless asked for.
+    if args.keep_offsets:
+        from midi_event_remapper import midi as _midi
+        reason = _midi.enable_keep_offsets(global_config.BACKEND)
+        if reason is None:
+            print(
+                "[startup] --keep-offsets enabled (experimental).\n"
+                "  Remapped events keep their input's position within the\n"
+                "  JACK period: exact with --jack-rt, exactly one period late\n"
+                "  with the buffered backend.  Uses undocumented mididings\n"
+                "  functions (passed a startup self-test).\n"
+            )
+        else:
+            global_config.urgent_print(
+                f"[startup] WARNING: --keep-offsets is off: {reason}.\n"
+                "  Running as without it: remapped events go out at the\n"
+                "  start of the JACK period.\n"
+            )
 
     if args.client_name:
         global_config.CLIENT_NAME = args.client_name
