@@ -265,16 +265,17 @@ Command-line reference
 
     **Timing within the buffer**
 
-    Both backends keep each event's position within the JACK buffer (its
-    sample offset): ``jack-rt`` sends it in the same period, the buffered
-    backend in the next period at the same offset.  A receiver that places
-    JACK MIDI events at their exact sample, such as the forked
-    SooperLooper's ``midi_in`` port, therefore gets exact placement with
-    either backend.  With ``jack-rt`` a command passed through the remapper
-    also arrives as early as it would with the controller connected
-    directly; with the buffered backend it arrives one period later.
-    Stock SooperLooper (ALSA MIDI only) starts commands at the beginning of
-    a buffer either way, but ``jack-rt`` still saves the period.
+    Remapped events do not yet keep their position within the JACK buffer
+    (their sample offset): each one is built new, without the incoming
+    event's position, so it goes out at the start of a buffer.  With
+    ``jack-rt`` that is the start of the same period, so a command arrives
+    up to one period early (0 to 5.3 ms at 256 frames / 48 kHz, 2.7 ms on
+    average); with the buffered backend it is the start of the next period,
+    so 0 to 5.3 ms late.  A receiver that places JACK MIDI events at their
+    exact sample, such as the forked SooperLooper's ``midi_in`` port,
+    therefore sees up to one period of timing scatter.  Stock SooperLooper
+    (ALSA MIDI only) starts commands at the beginning of a buffer anyway,
+    and ``jack-rt`` still saves the period.
 
     Also calls ``sys.setswitchinterval(0.0001)`` to reduce the chance
     that the Python GIL is held by another thread when the JACK callback
