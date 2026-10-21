@@ -335,7 +335,10 @@ Command-line reference
     255 samples before their stamps with ``--jack-rt`` (1 to 256 after,
     with the buffered backend).  With it, every output was placed at its
     own stamp with ``--jack-rt`` (exactly 256 after, with the buffered
-    backend).
+    backend).  On a live rig, 55 presses of a hardware MIDI pedal through
+    ``--jack-rt --keep-offsets`` all came out on the same frame as the
+    pedal's own events, so the remapper's processing time adds nothing
+    on JACK's timeline.
 
     It only matters to a receiver that places JACK MIDI events at their
     exact sample, such as the forked SooperLooper's JACK MIDI input; with
