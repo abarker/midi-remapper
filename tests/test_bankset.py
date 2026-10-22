@@ -988,6 +988,83 @@ class TestBankSwitch:
             bs.switch_bank("nonexistent")
 
 
+class TestGestureReleaseAcrossBankSwitch:
+    """A gesture's release goes to the bank that saw its press.
+
+    The rig case (2026-10-22): CC2 (repeat) pressed while CC3's long press
+    switched banks; the release arrived in a bank where CC2 is a direct
+    mapping, the repeat was never cancelled, and it ran for 12 minutes.
+    """
+
+    def _make(self):
+        return make_bankset(
+            {
+                "drums-lst": {
+                    "CC2": {
+                        "single":          [{"send": "CC1", "value": 127}],
+                        "repeat":          [{"send": "CC1", "value": 127}],
+                        "repeat_delay_ms": 500,
+                        "repeat_ms":       100,
+                    },
+                    "CC3": {
+                        "long":    [{"send": "BANK", "bank": "looper"}],
+                        "long_ms": 500,
+                    },
+                },
+                "looper": {
+                    "CC2": [{"send": "CC63", "press_only": True}],
+                },
+            },
+            active_bank="drums-lst",
+        )
+
+    def _press_cc2_then_switch(self, bs):
+        bs.handle(make_cc(3, value=127))
+        bs.handle(make_cc(2, value=127))
+        bs._gesture_long_timers["CC3"].fire()
+        assert bs.active_bank == "looper"
+
+    def test_quick_release_after_switch_stops_repeat(self, fake_timer):
+        bs, out = self._make()
+        self._press_cc2_then_switch(bs)
+        result = bs.handle(make_cc(2, value=0))
+        assert "CC2" not in bs._gesture_repeat_timers
+        # A quick tap: the pressing bank's single fires once.
+        assert [e.ctrl for e in result] == [1]
+        for t in fake_timer.active():
+            t.fire()
+        assert all(e.ctrl != 1 for e in out)
+
+    def test_release_after_switch_stops_running_repeat(self, fake_timer):
+        bs, out = self._make()
+        bs.handle(make_cc(2, value=127))
+        bs._gesture_repeat_timers["CC2"].fire()     # repeat running
+        bs.handle(make_cc(3, value=127))
+        bs._gesture_long_timers["CC3"].fire()
+        assert bs.active_bank == "looper"
+        result = bs.handle(make_cc(2, value=0))
+        assert result == []
+        assert "CC2" not in bs._gesture_repeat_timers
+        fired = len(out)
+        for t in fake_timer.active():
+            t.fire()
+        assert len(out) == fired
+
+    def test_release_does_not_fire_new_bank_mapping(self, fake_timer):
+        bs, out = self._make()
+        self._press_cc2_then_switch(bs)
+        result = bs.handle(make_cc(2, value=0))
+        assert all(e.ctrl != 63 for e in result + out)
+
+    def test_press_after_switch_uses_new_bank(self, fake_timer):
+        bs, out = self._make()
+        self._press_cc2_then_switch(bs)
+        bs.handle(make_cc(2, value=0))
+        result = bs.handle(make_cc(2, value=127))
+        assert [e.ctrl for e in result] == [63]
+        assert "CC2" not in bs._gesture_repeat_timers
+
+
 class TestCancelTimersActive:
     """Tests that _active flag prevents zombie timer callbacks after cancel."""
 

@@ -207,6 +207,7 @@ class BankSet:
         # Unified gesture state (replaces separate longpress / multipress dicts)
         self._gesture_counts     = {}  # key -> int   (accumulated press count)
         self._gesture_press_time = {}  # key -> float (time of most recent press)
+        self._gesture_press_bank = {}  # key -> bank the press was handled in
         self._gesture_timers     = {}  # key -> Timer (multipress window timer)
         self._gesture_events     = {}  # key -> event (most recent press event)
         self._gesture_long_timers   = {} # key -> Timer (long-press threshold timer)
@@ -415,12 +416,17 @@ class BankSet:
                 return []
 
             # Gesture release: long-press detection.
-            # Only intercept if we recorded a press for this key.
+            # Only intercept if we recorded a press for this key.  The
+            # release goes to the bank that saw the press, which differs
+            # from the active bank if a switch came in between (e.g. a
+            # long press on another key); otherwise a repeat would never
+            # be cancelled.
             if key in self._gesture_press_time:
-                etype = self._entry_types.get((bank_name, key))
+                press_bank = self._gesture_press_bank.get(key, bank_name)
+                etype = self._entry_types.get((press_bank, key))
                 if etype == "gesture":
                     return self._handle_gesture_release(
-                        key, bank.get(key, {}), event
+                        key, self.banks[press_bank].get(key, {}), event
                     )
 
             # Fast chord dismissal on CC=0 release.
@@ -1378,12 +1384,14 @@ class BankSet:
         # Accumulate state
         self._gesture_counts[key] = self._gesture_counts.get(key, 0) + 1
         self._gesture_press_time[key] = time.time()
+        self._gesture_press_bank[key] = self.active_bank
         self._gesture_events[key]     = event
 
         if not has_long and not has_repeat and not has_multi:
             # Only 'single' defined: fire immediately, no timing needed.
             self._gesture_counts.pop(key, None)
             self._gesture_press_time.pop(key, None)
+            self._gesture_press_bank.pop(key, None)
             self._gesture_events.pop(key, None)
             if has_single:
                 return self._execute_sequence(entry["single"], event)
@@ -1439,6 +1447,7 @@ class BankSet:
             self._gesture_counts.pop(key_, None)
             self._gesture_events.pop(key_, None)
             self._gesture_press_time.pop(key_, None)
+            self._gesture_press_bank.pop(key_, None)
             if self._debug:
                 print(f"[gesture:{self.name}] key={key_} -> long (timer)")
             self._fire_sequence(entry_["long"], ev_)
@@ -1575,6 +1584,7 @@ class BankSet:
         self._cancel_repeat(key)
 
         press_time = self._gesture_press_time.pop(key, None)
+        self._gesture_press_bank.pop(key, None)
         if press_time is None:
             return None
 
@@ -1661,6 +1671,7 @@ class BankSet:
             ev    = self._gesture_events.pop(key_, event)
             self._gesture_timers.pop(key_, None)
             self._gesture_press_time.pop(key_, None)
+            self._gesture_press_bank.pop(key_, None)
             label = {1: "single", 2: "double", 3: "triple"}.get(count)
             if self._debug:
                 print(
