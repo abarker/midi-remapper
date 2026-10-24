@@ -16,6 +16,7 @@
 #   bin/install.sh --dev            Editable install for development
 #   bin/install.sh --cython         Build the optional Cython RT extension
 #   bin/install.sh --no-tests       Skip the post-install test run
+#   bin/install.sh --pypi-mididings Keep PyPI's mididings, not the fork
 #
 # Options may be combined in any order, e.g.:
 #   bin/install.sh --dev --cython
@@ -36,15 +37,24 @@
 #   --jack-rt if the pure Python overhead is contributing; see the
 #   README for details.  Re-run the script with --cython any time
 #   midi_core.pyx is edited to recompile.
+#
+# Patched mididings (default; --pypi-mididings to skip)
+#   Installs a mididings fork from GitHub that fixes a deadlock in
+#   PyPI's mididings (20260601 and earlier), which can hang the
+#   remapper (see the README).  It replaces PyPI's mididings if that is
+#   already installed.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
+MIDIDINGS_FORK="git+https://github.com/abarker/mididings@release-gil-while-waiting"
+
 DEV=0
 CYTHON=0
 RUN_TESTS=1
+FORK_MIDIDINGS=1
 
 # ── Interactive menu (no arguments) ───────────────────────────────────────
 
@@ -86,6 +96,15 @@ if [[ $# -eq 0 ]]; then
         *)             RUN_TESTS=1 ;;
     esac
 
+    echo "  PyPI's mididings (20260601 and earlier) can deadlock and hang"
+    echo "  the remapper."
+    read -rp "Install the patched mididings fork instead? [Y/n]: " yn
+    echo ""
+    case "$yn" in
+        n|N|no|No|NO) FORK_MIDIDINGS=0 ;;
+        *)             FORK_MIDIDINGS=1 ;;
+    esac
+
 else
     # ── Argument parsing (non-interactive) ────────────────────────────────
     for arg in "$@"; do
@@ -93,13 +112,14 @@ else
             --dev)       DEV=1 ;;
             --cython)    CYTHON=1 ;;
             --no-tests)  RUN_TESTS=0 ;;
+            --pypi-mididings) FORK_MIDIDINGS=0 ;;
             -h|--help)
-                sed -n '2,40p' "${BASH_SOURCE[0]}" | grep '^#' | sed 's/^# \{0,1\}//'
+                sed -n '2,46p' "${BASH_SOURCE[0]}" | grep '^#' | sed 's/^# \{0,1\}//'
                 exit 0
                 ;;
             *)
                 echo "Unknown option: $arg" >&2
-                echo "Usage: $0 [--dev] [--cython] [--no-tests]" >&2
+                echo "Usage: $0 [--dev] [--cython] [--no-tests] [--pypi-mididings]" >&2
                 exit 1
                 ;;
         esac
@@ -116,6 +136,12 @@ if [[ ! -f pyproject.toml ]]; then
 fi
 
 # ── Install ───────────────────────────────────────────────────────────────
+
+if [[ $FORK_MIDIDINGS -eq 1 ]]; then
+    echo "=== Installing the patched mididings fork ==="
+    pip install "$MIDIDINGS_FORK"
+    echo ""
+fi
 
 if [[ $DEV -eq 1 ]]; then
     if [[ $CYTHON -eq 1 ]]; then

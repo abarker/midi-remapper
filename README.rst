@@ -49,6 +49,21 @@ from PyPI.  Don't use a distribution package instead: Ubuntu 24.04 has
 none, and older ones, where they exist, are the original, unmaintained
 release.
 
+Its releases up to the current one, 20260601, can deadlock when a
+program sends events from its own thread while a mididings unit is
+running, as the remapper does for timed outputs such as hold-repeat.
+The remapper then stops responding: with ``--jack-rt`` its JACK callback
+hangs and JACK reports xruns until restart; without it, MIDI output
+simply stops.  Until a release has the fix, install a fork with it into
+the same environment, before or after the remapper (``bin/install.sh``
+below does this by default)::
+
+    pip install git+https://github.com/abarker/mididings@release-gil-while-waiting
+
+The fork is 20260601 with the fix, and reports the same version, so
+``pip install --upgrade`` keeps it until mididings releases a newer
+version.
+
 Then choose one of the four install options below.
 
 **Install options**
@@ -84,7 +99,8 @@ Or pass flags for non-interactive use::
     bash bin/install.sh --dev                # editable, pure Python
     bash bin/install.sh --dev --cython       # editable, with Cython
 
-Add ``--no-tests`` to skip the post-install test run.
+Add ``--no-tests`` to skip the post-install test run, and
+``--pypi-mididings`` to keep PyPI's mididings instead of the fork.
 
 **Manual pip commands**
 
