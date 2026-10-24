@@ -60,7 +60,8 @@ below does this by default)::
 
     pip install git+https://github.com/abarker/mididings@release-gil-while-waiting
 
-The fork is 20260601 with the fix, and reports the same version, so
+The fork is 20260601 with the fix.  It reports its version as
+``20260601+gilfix``, which pip ranks above 20260601, so
 ``pip install --upgrade`` keeps it until mididings releases a newer
 version.
 
