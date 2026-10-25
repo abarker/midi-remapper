@@ -876,6 +876,16 @@ class BankSet:
     # Internal setup
     # ------------------------------------------------------------------
 
+    def _start_timer(self, delay_s, fn, args=()):
+        """Start a daemon timer that calls fn(*args) after delay_s, track
+        it in _timer_list for cancel_timers() and cleanup, and return it.
+        Every timer in this class is started here."""
+        t = threading.Timer(delay_s, fn, args=args)
+        t.daemon = True
+        t.start()
+        self._timer_list.append(t)
+        return t
+
     def _cleanup_timers(self):
         """Remove completed timers and warn about hung delay-send or
         JACK_TRANSPORT threads.
@@ -1092,10 +1102,7 @@ class BankSet:
                     if delay <= _IMMEDIATE_DELAY_S:
                         self._run_cmd(cmd)
                     else:
-                        t = threading.Timer(delay, self._run_cmd, args=(cmd,))
-                        t.daemon = True
-                        t.start()
-                        self._timer_list.append(t)
+                        self._start_timer(delay, self._run_cmd, args=(cmd,))
                 continue
 
             if send == "JACK_TRANSPORT":
@@ -1104,25 +1111,19 @@ class BankSet:
                     if delay <= _IMMEDIATE_DELAY_S:
                         self._run_jack_transport(transport)
                     else:
-                        t = threading.Timer(
+                        self._start_timer(
                             delay, self._run_jack_transport,
                             args=(transport,)
                         )
-                        t.daemon = True
-                        t.start()
-                        self._timer_list.append(t)
                 continue
 
             if send == "OSC":
                 if delay <= _IMMEDIATE_DELAY_S:
                     self._run_osc_send(item)
                 else:
-                    t = threading.Timer(
+                    self._start_timer(
                         delay, self._run_osc_send, args=(item,)
                     )
-                    t.daemon = True
-                    t.start()
-                    self._timer_list.append(t)
                 continue
 
             if item.get("press_only") and is_release(event):
@@ -1155,10 +1156,7 @@ class BankSet:
                             f"{elapsed*1000:.0f}ms for delayed send: {desc}"
                         )
                 _due = time.monotonic() + delay
-                t = threading.Timer(delay, _emit)
-                t.daemon = True
-                t.start()
-                self._timer_list.append(t)
+                t = self._start_timer(delay, _emit)
                 self._delay_send_threads.append((t, _due, _desc))
 
         return immediate
@@ -1318,11 +1316,8 @@ class BankSet:
         self._snapback_gen += 1
 
     def _schedule_snapback(self, gen, delay_s):
-        t = threading.Timer(delay_s, self._snapback_timer_fired, args=(gen,))
-        t.daemon = True
-        t.start()
-        self._timer_list.append(t)
-        self._snapback_timer = t
+        self._snapback_timer = self._start_timer(
+            delay_s, self._snapback_timer_fired, args=(gen,))
 
     def _snapback_timer_fired(self, gen):
         """Switch back once the idle time has run out and no pedal is held.
@@ -1470,11 +1465,8 @@ class BankSet:
                 print(f"[gesture:{self.name}] key={key_} -> long (timer)")
             self._fire_sequence(entry_["long"], ev_)
 
-        t = threading.Timer(threshold_s, fire_long)
-        t.daemon = True
-        t.start()
-        self._gesture_long_timers[key] = t
-        self._timer_list.append(t)
+        self._gesture_long_timers[key] = self._start_timer(threshold_s,
+                                                           fire_long)
 
     def _start_repeat_timer(self, key, entry, event, initial=False,
                              repeat_ms_override=None):
@@ -1573,11 +1565,8 @@ class BankSet:
             self._start_repeat_timer(key_, entry_, ev_, initial=False,
                                      repeat_ms_override=next_ms)
 
-        t = threading.Timer(delay_ms / 1000.0, fire_repeat)
-        t.daemon = True
-        t.start()
-        self._gesture_repeat_timers[key] = t
-        self._timer_list.append(t)
+        self._gesture_repeat_timers[key] = self._start_timer(
+            delay_ms / 1000.0, fire_repeat)
 
     def _cancel_repeat(self, key):
         """Cancel any pending repeat timer for key and clear fired state."""
@@ -1702,11 +1691,8 @@ class BankSet:
                 self._fire_sequence(entry_[label], ev)
 
         window_ms = entry.get("multi_ms", self._multi_press_window_ms)
-        t = threading.Timer(window_ms / 1000.0, fire)
-        t.daemon = True
-        t.start()
-        self._gesture_timers[key] = t
-        self._timer_list.append(t)
+        self._gesture_timers[key] = self._start_timer(window_ms / 1000.0,
+                                                      fire)
 
     # ------------------------------------------------------------------
     # Trigger value matching
@@ -1942,12 +1928,9 @@ class BankSet:
                             )
                     return expire
 
-                t = threading.Timer(
+                t = self._start_timer(
                     self._chord_window_ms / 1000.0, make_expire()
                 )
-                t.daemon = True
-                t.start()
-                self._timer_list.append(t)
                 self._chord_pending[fk] = {
                     "arrived":     {key},
                     "timer":       t,
@@ -2035,11 +2018,8 @@ class BankSet:
                 self._fire_sequence(entry_[label], ev_)
 
         window_ms = entry.get("multi_ms", self._multi_press_window_ms)
-        t = threading.Timer(window_ms / 1000.0, fire)
-        t.daemon = True
-        t.start()
+        t = self._start_timer(window_ms / 1000.0, fire)
         self._chord_counts[fk] = {"count": count, "timer": t}
-        self._timer_list.append(t)
 
     def _fire_sequence_gesture_fallback(self, key, entry, event, press_time):
         """
