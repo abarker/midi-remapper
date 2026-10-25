@@ -719,6 +719,11 @@ Bank switches can be combined with other sends in the same sequence::
         ],
     },
 
+A pedal held across a switch still belongs to the bank where it was
+pressed: its release goes there, not to the new bank's mapping.  A
+``"repeat"`` running on it stops at the switch, and its release then
+does nothing.
+
 **Snapback**
 
 Add ``"snapback_after_ms"`` to a ``"BANK"`` send to return automatically

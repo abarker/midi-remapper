@@ -1503,6 +1503,13 @@ class BankSet:
             if key_ not in self._gesture_press_time:
                 return
             self._gesture_repeat_fired.add(key_)
+            # A bank switch since the press ends the repeat.  The hold
+            # counts as used, so the release stays silent.
+            if self._gesture_press_bank.get(key_) != self.active_bank:
+                if self._debug:
+                    print(f"[gesture:{self.name}] key={key_} -> repeat "
+                          f"stopped by bank switch")
+                return
 
             # ── Accel tier selection ──────────────────────────────────
             # Walk the sorted tiers and take the last one whose

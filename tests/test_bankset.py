@@ -994,6 +994,8 @@ class TestGestureReleaseAcrossBankSwitch:
     The rig case (2026-10-22): CC2 (repeat) pressed while CC3's long press
     switched banks; the release arrived in a bank where CC2 is a direct
     mapping, the repeat was never cancelled, and it ran for 12 minutes.
+    A repeat also stops at the switch itself, without waiting for the
+    release.
     """
 
     def _make(self):
@@ -1049,6 +1051,30 @@ class TestGestureReleaseAcrossBankSwitch:
         for t in fake_timer.active():
             t.fire()
         assert len(out) == fired
+
+    def test_running_repeat_stops_at_switch(self, fake_timer):
+        bs, out = self._make()
+        bs.handle(make_cc(2, value=127))
+        bs._gesture_repeat_timers["CC2"].fire()     # repeat running
+        bs.handle(make_cc(3, value=127))
+        bs._gesture_long_timers["CC3"].fire()
+        assert bs.active_bank == "looper"
+        fired = len(out)
+        for _ in range(3):                          # key still held
+            for t in fake_timer.active():
+                t.fire()
+        assert len(out) == fired
+        assert "CC2" not in bs._gesture_repeat_timers
+        assert bs.handle(make_cc(2, value=0)) == []
+
+    def test_first_repeat_due_after_switch_does_not_fire(self, fake_timer):
+        bs, out = self._make()
+        self._press_cc2_then_switch(bs)
+        bs._gesture_repeat_timers["CC2"].fire()     # repeat delay ran out
+        assert out == []
+        assert "CC2" not in bs._gesture_repeat_timers
+        # The hold was used up by the switch: no single on release.
+        assert bs.handle(make_cc(2, value=0)) == []
 
     def test_release_does_not_fire_new_bank_mapping(self, fake_timer):
         bs, out = self._make()
