@@ -1,14 +1,17 @@
 """Tests for scheduler.py (real threads, real clock).
 
-The scheduler is not used by BankSet yet; these check it on its own.
+These check the scheduler on its own; test_bankset_realclock.py checks
+BankSet's timers on it.
 Timing tolerances are loose so a loaded machine doesn't fail them.
 """
+import os
 import threading
 import time
 
 import pytest
 
-from midi_event_remapper.scheduler import Scheduler, Timer, get_scheduler
+from midi_event_remapper.scheduler import (Scheduler, Timer, get_scheduler,
+                                           _SetPriority)
 
 
 @pytest.fixture
@@ -263,3 +266,58 @@ def test_shared_scheduler_is_started_once():
     calls = []
     Timer(0.0, calls.append, args=(1,)).start()
     assert wait_until(lambda: calls)
+
+
+def _call_at_fifo(prio, fn):
+    """Run fn() on a new thread at SCHED_FIFO prio; return its result,
+    or skip the test if SCHED_FIFO is not permitted here."""
+    result = {}
+
+    def run():
+        try:
+            os.sched_setscheduler(0, os.SCHED_FIFO, os.sched_param(prio))
+        except (AttributeError, OSError):
+            result["skip"] = True
+            return
+        result["value"] = fn()
+
+    t = threading.Thread(target=run)
+    t.start()
+    t.join()
+    if result.get("skip"):
+        pytest.skip("SCHED_FIFO not permitted here")
+    return result["value"]
+
+
+def test_follow_caller_priority_from_a_normal_thread(sched):
+    assert sched.follow_caller_priority() is None
+    calls = []
+    Timer(0.0, calls.append, args=(1,), scheduler=sched).start()
+    assert wait_until(lambda: calls)
+    assert sched.priority is None
+    assert os.sched_getscheduler(sched._thread.native_id) == os.SCHED_OTHER
+
+
+def test_follow_caller_priority_from_a_fifo_thread(sched, capsys):
+    assert _call_at_fifo(10, sched.follow_caller_priority) == 9
+    assert wait_until(lambda: sched.priority == 9)
+    tid = sched._thread.native_id
+    assert os.sched_getscheduler(tid) == os.SCHED_FIFO
+    assert os.sched_getparam(tid).sched_priority == 9
+    assert "SCHED_FIFO 9" in capsys.readouterr().out
+
+
+def test_follow_caller_priority_stays_valid_at_priority_1(sched, capsys):
+    assert _call_at_fifo(1, sched.follow_caller_priority) == 1
+    assert wait_until(lambda: sched.priority == 1)
+    assert "SCHED_FIFO 1" in capsys.readouterr().out
+
+
+def test_refused_priority_warns_and_timers_still_run(sched, capsys):
+    sched._inbox.put(_SetPriority(1000))       # out of range: EINVAL
+    calls = []
+    Timer(0.0, calls.append, args=(1,), scheduler=sched).start()
+    assert wait_until(lambda: calls)
+    assert sched.priority is None
+    assert isinstance(sched.priority_error, OSError)
+    assert "WARNING" in capsys.readouterr().err

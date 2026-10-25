@@ -8,7 +8,6 @@ imports, ensuring that when midi.py does 'from mididings import ...'
 it receives the mock objects instead of the real mididings library.
 """
 import sys
-import threading
 import pytest
 
 # ---------------------------------------------------------------------------
@@ -30,16 +29,18 @@ import os as _os
 if _os.environ.get("MIDI_REMAPPER_NO_CYTHON"):
     sys.modules.setdefault("midi_event_remapper.midi_core", None)
 
+from midi_event_remapper import scheduler
+
 
 # ---------------------------------------------------------------------------
-# FakeTimer: replaces threading.Timer so tests control when timers fire.
+# FakeTimer: replaces scheduler.Timer so tests control when timers fire.
 # ---------------------------------------------------------------------------
 
 class FakeTimer:
     """
-    Drop-in replacement for threading.Timer that does not start a real
-    thread.  Timers accumulate in FakeTimer.instances and must be fired
-    manually in tests via timer.fire().
+    Drop-in replacement for scheduler.Timer (as BankSet uses it) that is
+    never scheduled.  Timers accumulate in FakeTimer.instances and must be
+    fired manually in tests via timer.fire().
     """
     instances = []
 
@@ -77,11 +78,11 @@ class FakeTimer:
 @pytest.fixture
 def fake_timer(monkeypatch):
     """
-    Patch threading.Timer with FakeTimer for the duration of a test.
+    Patch scheduler.Timer with FakeTimer for the duration of a test.
     Returns the FakeTimer class so tests can inspect and fire timers.
     """
     FakeTimer.clear()
-    monkeypatch.setattr(threading, "Timer", FakeTimer)
+    monkeypatch.setattr(scheduler, "Timer", FakeTimer)
     return FakeTimer
 
 

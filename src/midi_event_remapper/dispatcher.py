@@ -14,6 +14,7 @@ from mididings import config as mididings_config, run as mididings_run, \
 import mididings.engine as engine
 
 from midi_event_remapper import config
+from midi_event_remapper import scheduler
 
 
 def check_jack():
@@ -85,6 +86,10 @@ def setup():
         bs.set_output_fn(engine.output_event)
 
 
+# True until main_handler has seen its first event; see there.
+_follow_priority = True
+
+
 def main_handler(event):
     """
     Main mididings event handler.  Offers each incoming event to the
@@ -102,7 +107,17 @@ def main_handler(event):
     the CLI, or ``"debug": True`` in the global settings block of a config
     file.  BankSet-internal detail (gesture timing, chord windows, etc.)
     is gated on the per-BankSet ``bs._debug`` flag and is independent.
+
+    On the first event the timer scheduler is asked to run just below this
+    thread's priority: under ``--jack-rt`` this is the JACK callback,
+    whose priority JACK sets.  Under the buffered backend this thread
+    runs at normal priority, and so does the scheduler.
     """
+    global _follow_priority
+    if _follow_priority:
+        _follow_priority = False
+        scheduler.get_scheduler().follow_caller_priority()
+
     if config.DEBUG:
         # Wall-clock stamp so a frozen session can be lined up against
         # 'dmesg -T' / 'journalctl -k'.  This is the datum a freeze turns
@@ -163,6 +178,10 @@ def run():
             f"  Start it with QjackCtl or: jackd -d alsa\n"
         )
         sys.exit(1)
+
+    # Start the timer thread now, not lazily from the first timer, which
+    # under --jack-rt would start it inside the JACK callback.
+    scheduler.get_scheduler()
 
     try:
         mididings_run(

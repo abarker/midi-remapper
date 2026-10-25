@@ -2,17 +2,20 @@
 
 One scheduler thread for timed callbacks, in place of a thread per timer.
 
-Not used yet: ``BankSet`` still starts a ``threading.Timer`` for every
-deferred action (see ``BankSet._start_timer``).  Under ``--jack-rt`` each
-of those starts creates an OS thread inside the JACK callback.  With this
-module, starting a timer only puts it on a queue, which never blocks and
+``BankSet`` starts every deferred action here (see
+``BankSet._start_timer``).  A ``threading.Timer`` per action would create
+an OS thread each time, inside the JACK callback under ``--jack-rt``.
+Here, starting a timer only puts it on a queue, which never blocks and
 creates no thread; one long-lived thread waits for the earliest deadline
 and runs the callbacks one at a time.  See ROADMAP entry 5.
 
 ``Timer`` offers the subset of ``threading.Timer`` that ``BankSet`` uses
-(the constructor, ``daemon``, ``start()``, ``cancel()``, ``is_alive()``),
-so switching over is a change to ``BankSet._start_timer`` only, and the
-tests' ``FakeTimer`` keeps standing in for both.
+(the constructor, ``daemon``, ``start()``, ``cancel()``, ``is_alive()``);
+the tests' ``FakeTimer`` stands in for it.
+
+``dispatcher`` starts the shared scheduler before MIDI processing begins,
+and on the first event asks it to run just below the priority of the
+thread that handles events (``Scheduler.follow_caller_priority``).
 
 Cancellation is lazy: ``cancel()`` marks the timer, and the scheduler
 drops it when its deadline comes up.  As with ``threading.Timer``, a
@@ -36,6 +39,14 @@ _DONE      = "done"
 _CANCELED  = "canceled"
 
 _STOP = object()   # inbox sentinel: stop the scheduler thread
+
+
+class _SetPriority:
+    """Inbox message: switch the scheduler thread to ``SCHED_FIFO``."""
+    __slots__ = ("priority",)
+
+    def __init__(self, priority):
+        self.priority = priority
 
 
 class Timer:
@@ -102,6 +113,7 @@ class Scheduler:
         If given, the thread asks for ``SCHED_FIFO`` at this priority.
         Failure (no permission, unsupported platform) is recorded in
         ``priority_error`` and the thread runs at normal priority.
+        ``priority`` holds the priority actually granted, or None.
     on_error : callable or None
         Called as ``on_error(timer, exc)`` when a callback raises.  The
         default prints the traceback to stderr.  Either way the scheduler
@@ -110,13 +122,14 @@ class Scheduler:
 
     def __init__(self, name="TimerScheduler", priority=None, on_error=None):
         self._name           = name
-        self._priority       = priority
+        self._priority       = priority      # requested at start()
         self._on_error       = on_error or _print_error
         self._inbox          = queue.SimpleQueue()
         self._heap           = []              # (due, seq, timer)
         self._seq            = itertools.count()
         self._thread         = None
         self._stopped        = False
+        self.priority        = None          # granted SCHED_FIFO priority
         self.priority_error  = None
 
     # ------------------------------------------------------------------
@@ -142,6 +155,29 @@ class Scheduler:
     def is_running(self):
         return self._thread is not None and self._thread.is_alive()
 
+    def follow_caller_priority(self, below=1):
+        """Have the scheduler thread run ``SCHED_FIFO`` ``below`` steps
+        under the calling thread, if the caller runs ``SCHED_FIFO`` or
+        ``SCHED_RR``; otherwise do nothing.  Return the priority asked
+        for, or None.
+
+        Meant to be called once from the thread that handles events: under
+        ``--jack-rt`` that is the JACK callback, whose priority JACK sets.
+        It never blocks: two syscalls to read the caller's priority and a
+        queue put.  The scheduler thread changes its own priority and
+        prints the outcome.
+        """
+        try:
+            policy = os.sched_getscheduler(0)
+            prio   = os.sched_getparam(0).sched_priority
+        except (AttributeError, OSError):
+            return None
+        if policy not in (os.SCHED_FIFO, os.SCHED_RR):
+            return None
+        target = max(1, prio - below)
+        self._inbox.put(_SetPriority(target))
+        return target
+
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
@@ -151,19 +187,35 @@ class Scheduler:
             raise RuntimeError("scheduler is stopped")
         self._inbox.put(timer)
 
-    def _set_priority(self):
+    def _set_priority(self, priority):
+        """Switch this thread to ``SCHED_FIFO`` at ``priority``; return
+        True if granted (scheduler thread)."""
         try:
             # pid 0 is the calling thread on Linux.
             os.sched_setscheduler(0, os.SCHED_FIFO,
-                                  os.sched_param(self._priority))
+                                  os.sched_param(priority))
         except (AttributeError, OSError) as exc:
             self.priority_error = exc
+            return False
+        self.priority       = priority
+        self.priority_error = None
+        return True
+
+    def _follow_priority(self, priority):
+        if self._set_priority(priority):
+            print(f"[scheduler] timer thread runs at SCHED_FIFO {priority}")
+        else:
+            print(f"[scheduler] WARNING: could not set SCHED_FIFO "
+                  f"{priority} on the timer thread "
+                  f"({self.priority_error}); timers run at normal "
+                  f"priority and may fire late under load.",
+                  file=sys.stderr)
 
     def _run(self):
         """Wait for new timers or the earliest deadline, whichever comes
         first, and run whatever is due (scheduler thread)."""
         if self._priority is not None:
-            self._set_priority()
+            self._set_priority(self._priority)
         heap = self._heap
         while True:
             if heap:
@@ -178,7 +230,10 @@ class Scheduler:
             while item is not None:
                 if item is _STOP:
                     return
-                heapq.heappush(heap, (item._due, next(self._seq), item))
+                if item.__class__ is _SetPriority:
+                    self._follow_priority(item.priority)
+                else:
+                    heapq.heappush(heap, (item._due, next(self._seq), item))
                 try:
                     item = self._inbox.get_nowait()
                 except queue.Empty:

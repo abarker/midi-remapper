@@ -15,13 +15,14 @@ import time
 
 from midi_event_remapper.midi import build_event, event_key, is_release
 from midi_event_remapper import midi as _midi
+from midi_event_remapper import scheduler as _scheduler
 from midi_event_remapper.config import urgent_print
 
 # Delays at or below this threshold are sent synchronously rather than
-# spawning a threading.Timer.  Any delay <= 1 ms is musically meaningless
+# starting a timer.  Any delay <= 1 ms is musically meaningless
 # (JACK buffer periods are longer), so the events are sent immediately.
-# This lets configs use "delay": 0.001 as a no-op sentinel without spawning
-# a thread, while still allowing real delays like 0.200 to use the timer.
+# This lets configs use "delay": 0.001 as a no-op sentinel without starting
+# a timer, while still allowing real delays like 0.200 to use the timer.
 # The smallest meaningful real delay is therefore 0.002 s (2 ms).
 _IMMEDIATE_DELAY_S = 0.001
 
@@ -877,11 +878,11 @@ class BankSet:
     # ------------------------------------------------------------------
 
     def _start_timer(self, delay_s, fn, args=()):
-        """Start a daemon timer that calls fn(*args) after delay_s, track
-        it in _timer_list for cancel_timers() and cleanup, and return it.
-        Every timer in this class is started here."""
-        t = threading.Timer(delay_s, fn, args=args)
-        t.daemon = True
+        """Start a timer that calls fn(*args) after delay_s on the shared
+        scheduler thread, track it in _timer_list for cancel_timers() and
+        cleanup, and return it.  Every timer in this class is started
+        here.  Starting one never blocks and creates no thread."""
+        t = _scheduler.Timer(delay_s, fn, args=args)
         t.start()
         self._timer_list.append(t)
         return t
@@ -891,15 +892,16 @@ class BankSet:
         JACK_TRANSPORT threads.
 
         Each chord window, gesture timer, and delayed send creates a
-        threading.Timer (which is a thread).  Without cleanup, the list
-        grows indefinitely with dead threads, eventually causing hangs.
+        scheduler Timer.  Without cleanup, the list grows indefinitely
+        with finished timers.
         Called from handle() when the list exceeds 50 entries OR when
         delay-send / transport threads are pending and 5 seconds have
         elapsed since the last check.
 
-        Hung detection (delay sends): a delay-send thread that is still
+        Hung detection (delay sends): a delay-send timer that is still
         alive more than 1 second past its scheduled fire time is probably
-        blocked inside _output_fn waiting on a stalled JACK graph.
+        blocked inside _output_fn waiting on a stalled JACK graph.  That
+        blocks the scheduler thread, so every other timer waits too.
 
         Hung detection (JACK_TRANSPORT): a transport thread that has been
         running for more than 1 second is probably blocked inside
@@ -1060,7 +1062,7 @@ class BankSet:
     def _execute_sequence(self, seq, event):
         """
         Execute a sequence list.  Immediate events are returned as a list.
-        Delayed events are scheduled via threading.Timer.
+        Delayed events are scheduled via _start_timer.
         BANK sends are executed inline.
         Returns a list (possibly empty -- empty means "handled, emit nothing").
         """
