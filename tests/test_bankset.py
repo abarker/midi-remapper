@@ -2321,6 +2321,61 @@ class TestSnapback:
         self._fire(bs)
         assert shown == ["drums", "looper"]
 
+    # -- display marker --------------------------------------------------
+
+    def _shown(self, bs):
+        shown = []
+        bs._display_styles = {"looper": {"bg": "#00ff00", "fg": "#000000"},
+                              "drums":  {"bg": "#ff0000"}}
+        bs._display_fn = lambda bset, bank, style: shown.append((bank, style))
+        return shown
+
+    def test_marker_shows_target_and_its_colors(self, clock):
+        bs, _ = self._bs()
+        shown = self._shown(bs)
+        bs.handle(make_pc(1))
+        assert shown == [("drums", {"bg": "#ff0000", "snapback": {
+            "bank": "looper", "bg": "#00ff00", "fg": "#000000"}})]
+        assert bs._display_styles["drums"] == {"bg": "#ff0000"}  # not changed
+
+    def test_marker_keeps_target_through_second_timed_switch(self, clock):
+        bs, _ = self._bs()
+        shown = self._shown(bs)
+        bs.handle(make_pc(1))
+        bs.handle(make_pc(1))
+        bank, style = shown[-1]
+        assert bank == "tap"
+        assert style == {"snapback": {"bank": "looper", "bg": "#00ff00",
+                                      "fg": "#000000"}}
+
+    def test_marker_gone_after_snapback(self, clock):
+        bs, _ = self._bs()
+        shown = self._shown(bs)
+        bs.handle(make_pc(1))
+        clock.now = 1004.0
+        self._fire(bs)
+        assert shown[-1] == ("looper", {"bg": "#00ff00", "fg": "#000000"})
+
+    def test_marker_gone_after_plain_switch(self, clock):
+        bs, _ = self._bs()
+        shown = self._shown(bs)
+        bs.handle(make_pc(1))
+        bs.handle(make_pc(3))
+        assert shown[-1] == ("tap", None)
+
+    def test_cancel_removes_marker(self, clock):
+        bs, _ = self._bs()
+        shown = self._shown(bs)
+        bs.handle(make_pc(1))
+        bs.handle(make_pc(6))
+        assert shown[-1] == ("drums", {"bg": "#ff0000"})
+
+    def test_cancel_with_empty_slot_sends_nothing(self, clock):
+        bs, _ = self._bs(active_bank="drums")
+        shown = self._shown(bs)
+        bs.handle(make_pc(6))
+        assert shown == []
+
     def test_pedal_use_moves_deadline_timer_sleeps_again(self, clock):
         bs, _ = self._bs()
         bs.handle(make_pc(1))

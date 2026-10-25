@@ -185,7 +185,7 @@ class BankSet:
         self.active_bank = active_bank
 
         self._output_fn             = output_fn
-        self._display_fn            = display_fn  # called on bank switch: fn(bankset_name, bank_name, style)
+        self._display_fn            = display_fn  # called on bank switch and snapback cancel: fn(bankset_name, bank_name, style)
         self._display_styles        = display_styles or {}  # bank_name -> style dict
         self._debug                 = debug
         self._data_offset           = data_offset
@@ -343,12 +343,28 @@ class BankSet:
         # itself, empties the slot.
         if name == self._snapback_bank:
             self._clear_snapback()
-        if self._display_fn is not None:
-            try:
-                style = self._display_styles.get(name)
-                self._display_fn(self.name, name, style)
-            except Exception:
-                pass  # never let display errors crash the MIDI handler
+        self._show_active_bank()
+
+    def _show_active_bank(self):
+        """Send the active bank to the display.  While the snapback slot is
+        full, the style carries a "snapback" entry naming the target bank
+        and its colors, which the window shows as a marker."""
+        if self._display_fn is None:
+            return
+        try:
+            name   = self.active_bank
+            style  = self._display_styles.get(name)
+            target = self._snapback_bank
+            if target is not None:
+                target_style = self._display_styles.get(target) or {}
+                style = dict(style or {}, snapback={
+                    "bank": target,
+                    "bg":   target_style.get("bg"),
+                    "fg":   target_style.get("fg"),
+                })
+            self._display_fn(self.name, name, style)
+        except Exception:
+            pass  # never let display errors crash the MIDI handler
 
     def handle(self, event):
         """
@@ -1062,10 +1078,12 @@ class BankSet:
                 continue
 
             if send == "SNAPBACK_CANCEL":
-                if self._debug and self._snapback_bank is not None:
-                    print(f"[snapback:{self.name}] canceled, staying in "
-                          f"{self.active_bank!r}")
-                self._clear_snapback()
+                if self._snapback_bank is not None:
+                    if self._debug:
+                        print(f"[snapback:{self.name}] canceled, staying in "
+                              f"{self.active_bank!r}")
+                    self._clear_snapback()
+                    self._show_active_bank()   # removes the marker
                 continue
 
             if send == "CMD":

@@ -14,6 +14,13 @@ It reads newline-delimited JSON arrays from stdin::
 and renders them in a tkinter window.  A ``None`` / null style falls back
 to module-level defaults.
 
+While a snapback is pending, the style also carries the bank it will
+return to, shown as a border in that bank's text color around the bank
+name::
+
+    ["bankset_name", "drums-lst", {"bg": "#2e1a1a",
+        "snapback": {"bank": "looper", "bg": "#1a2e1a", "fg": null}}]
+
 Shutdown protocol
 -----------------
 * **User closes window** (Exit menu item or title-bar X button): the Tk
@@ -54,6 +61,7 @@ FONT_BANKSET = ("Helvetica", 14)
 FONT_BANK    = ("Helvetica", DEFAULT_FONT_SIZE, "bold")
 WINDOW_TITLE = "Bank Display"
 POLL_MS      = 50   # How often the Tk event loop checks the queue (ms).
+SNAPBACK_BORDER = 10   # Pending-snapback border width (px).
 
 
 # ---------------------------------------------------------------------------
@@ -241,9 +249,20 @@ class _BankDisplayWindow:
         )
         bankset_label.pack(fill=tk.X)
 
-        # Bank name in large text.
-        frame = tk.Frame(root, bg=DEFAULT_BG)
-        frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        # Bank name in large text.  The frame's highlight is the
+        # pending-snapback border; with none pending it is in the bank's
+        # own background.  It takes its width out of the frame's margin
+        # (20 px at the sides, 10 at top and bottom without it), so the
+        # window keeps its size.
+        frame = tk.Frame(
+            root,
+            bg                  = DEFAULT_BG,
+            highlightthickness  = SNAPBACK_BORDER,
+            highlightbackground = DEFAULT_BG,
+            highlightcolor      = DEFAULT_BG,
+        )
+        frame.pack(fill=tk.BOTH, expand=True,
+                   padx=20 - SNAPBACK_BORDER, pady=10 - SNAPBACK_BORDER)
 
         bank_label = tk.Label(
             frame,
@@ -372,6 +391,12 @@ class _BankDisplayWindow:
             font = (FONT_BANK[0], font_size, FONT_BANK[2]),
         )
         self._bankset_label.configure(bg=bg)
+
+        # The border is in the return bank's text color: bank backgrounds
+        # tend to be dark and alike, their text colors bright and distinct.
+        snap = style.get("snapback")
+        border = (snap.get("fg") or DEFAULT_FG) if snap else bg
+        self._frame.configure(highlightbackground=border, highlightcolor=border)
 
         if "width" in style or "height" in style:
             w = style.get("width",  self._root.winfo_width())

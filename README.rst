@@ -733,8 +733,9 @@ that long::
 
 A long press here switches to ``drums``; 4 seconds after the last pedal
 use there, the remapper switches back by itself, and the bank display
-changes with it.  The same bank entered by a switch without the key
-stays put.
+changes with it.  While a return is pending, the bank name has a border
+in the ``"_display"`` text color (``"fg"``) of the bank it will return
+to.  The same bank entered by a switch without the key stays put.
 
 - **Pedal use** is any press or release of a key mapped in the active
   bank.  Each one restarts the countdown.  Events not mapped in the
@@ -749,8 +750,8 @@ stays put.
   the original target and restarts the countdown with its own timeout.
   A config reload also cancels it.
 - **Canceling.**  ``{"send": "SNAPBACK_CANCEL"}`` cancels a pending
-  return and stays in the current bank.  With nothing pending it does
-  nothing.
+  return and stays in the current bank; the border disappears.
+  With nothing pending it does nothing.
 - **Timeout.**  At least 2000 ms, and longer than every ``long_ms``,
   ``multi_ms`` and chord window in the BankSet, so no gesture is still
   being decided when it runs out.  ``--validate`` checks this.  Choose a
