@@ -16,6 +16,17 @@ press need no release at all -- they only count presses within a time
 window -- so they also work on event types that have no release signal,
 such as Program Change.
 
+Mappings are organized in *banks* (which some other tools call scenes,
+pages or layers).  A bank maps incoming MIDI events to outgoing events and
+other actions, such as OSC messages, shell commands or a switch to another
+bank.  It also recognizes gestures, such as chords, long presses and double
+presses, and can map each of them differently.  For example, a footswitch
+might have a ``looper`` bank, where its pedals control a looper, and a
+``drums`` bank, where the same pedals start the drums and change the
+tempo.  Together the two banks form a *BankSet*: one of them is active at a
+time, and a mapping such as a long press switches to the other, changing
+what every pedal does at once.
+
 An optional window (``--display``) shows the active bank in large type,
 in colors set per bank, so a bank switch can be confirmed at a glance
 (see `Bank display window`_).
@@ -57,8 +68,9 @@ the clone, or wherever you prefer, then activate it::
     python3 -m venv .venv
     source .venv/bin/activate
 
-``mididings``, which pip installs as a dependency, is compiled during
-installation, so first install the system libraries it builds against::
+The ``mididings`` package, which pip installs as a dependency, is compiled
+during installation, so first install the system libraries it builds
+against::
 
     # Debian / Ubuntu
     sudo apt install build-essential pkg-config python3-dev \
@@ -109,8 +121,8 @@ Cython RT extension (``--cython``)
 
 **Using the install script (easier)**
 
-``bin/install.sh`` handles all four combinations.  Run it with no
-arguments for an interactive menu::
+The script ``bin/install.sh`` handles all four combinations.  Run it with
+no arguments for an interactive menu::
 
     bash bin/install.sh
 
@@ -143,10 +155,10 @@ The ``[rt]`` extra installs Cython; ``[dev]`` adds pytest.  Re-run
 
 **Dependencies**
 
-``mididings``, ``JACK-Client`` and ``python-osc``, which pip installs; a
-running JACK server (via QjackCtl or ``jackd``); and, for the ``--display``
-window, ``tkinter`` (usually part of Python; ``python3-tk`` on
-Debian/Ubuntu).
+The remapper needs ``mididings``, ``JACK-Client`` and ``python-osc``,
+which pip installs; a running JACK server (via QjackCtl or ``jackd``); and,
+for the ``--display`` window, ``tkinter`` (usually part of Python;
+``python3-tk`` on Debian/Ubuntu).
 
 **Platform.**  Developed and tested on Ubuntu 24.04; other Linux
 distributions should work the same way.  MIDI input and output use JACK
@@ -187,9 +199,9 @@ Use the full path (e.g. from a launcher script), a symlink to it on your
 Typing the bare command name in a shell without the venv active works only
 if one of those is in place.
 
-``pipx install`` works the same way -- it also creates a dedicated venv
-per tool with an absolute-shebang console script -- with the added
-convenience that ``pipx ensurepath`` puts it on ``PATH`` for you
+Installing with ``pipx install`` works the same way -- it also creates a
+dedicated venv per tool with an absolute-shebang console script -- with
+the added convenience that ``pipx ensurepath`` puts it on ``PATH`` for you
 automatically.
 
 
@@ -278,7 +290,7 @@ Command-line reference
 ``--multi-press-ms MS``
     Override the multi-press accumulation window (global default).
     Individual keys can override this further with ``"multi_ms"`` in
-    their entry dict.
+    their entry.
 
 ``--chord-ms MS``
     Override the chord detection window.
@@ -477,7 +489,7 @@ pending, the bank name has a border in the return bank's text color (see
 
 Each bank can define its own background color, text color, font size,
 and window dimensions via a ``"_display"`` key placed directly inside the
-bank dict in the config file::
+bank in the config file::
 
     "banks": {
         "default": {
@@ -492,9 +504,9 @@ bank dict in the config file::
     },
 
 All five keys are optional.  Any key omitted falls back to its own
-default (dark background, white text, 72-point font).  ``"_display"`` is
-stripped before MIDI mapping lookup and does not interfere with any
-event key.
+default (dark background, white text, 72-point font).  The
+``"_display"`` key is stripped before MIDI mapping lookup and does not
+interfere with any event key.
 
 Style changes take effect immediately on the next bank switch.  When the
 config file is reloaded live, the new styles are applied at once without
@@ -570,11 +582,11 @@ Dispatcher level
 BankSet level
     Prints ``[BankSet:name] handle key=...``, gesture timing, chord
     windows, and sequence dispatch detail for one BankSet.  Turn it on with
-    ``"debug": True`` inside that BankSet's dict.
+    ``"debug": True`` in that BankSet's settings.
 
 The ``--debug`` CLI flag sets both levels simultaneously and is the
-simplest way to get full output.  Setting ``"debug": True`` inside a
-BankSet dict gives internal trace for that BankSet only, without the
+simplest way to get full output.  Setting ``"debug": True`` in a
+BankSet gives internal trace for that BankSet only, without the
 dispatcher-level wrapper lines.  This is useful when you have multiple
 BankSets and want to trace only one without flooding the terminal.
 
@@ -585,9 +597,35 @@ Configuration
 Config files
 ~~~~~~~~~~~~
 
-A ``.py`` file is a plain Python data literal -- no imports, no function
-calls, just a dict (single BankSet) or list of dicts (multiple BankSets).
-Comments use ``#``.  Chord keys use ``+`` notation::
+Each config file defines a BankSet: its name, its banks, and the bank that
+is active at startup.  A file can also hold several BankSets as a list.  A
+BankSet doesn't care which controller or MIDI channel an event comes from,
+only its type and number (``CC5``, ``NOTE60``, ``PC3``).  Each incoming
+event is offered to the BankSets in order.  Within each one, only the
+active bank's mappings are checked, and the first BankSet that maps the
+event handles it.  Events that no BankSet maps pass through unchanged.
+Most setups need one BankSet.  A second one, listed first, can hold
+mappings that stay the same whatever bank the other is in, since a bank
+switch changes only the active bank of its own BankSet.
+
+A config file is a short text file describing your mappings.
+The annotated example at `examples/example.py <examples/example.py>`_ is a good
+start: you can copy it and edit it.  The format is simple:
+
+- A file for one BankSet is enclosed in one pair of braces, ``{ ... }``.
+- Each setting is a name in quotes, a colon and a value, followed by a
+  comma: ``"name": "mycontroller",``.
+- A setting made of several settings uses braces too, like ``"banks"``
+  below, and a list uses square brackets, like the outputs of each key.
+- Text after ``#`` is a comment.
+- A chord joins its keys with ``+``: ``"CC3+CC4"``.
+
+For those who know Python, the config file is a Python dict literal (or a list
+of them for several BankSets). It is read with ``ast.literal_eval``, so it is
+only read, never run.  Writing a config file, however, requires no knowledge of
+Python.  
+
+A small example::
 
     # mycontroller.py
     {
@@ -625,7 +663,7 @@ Comments use ``#``.  Chord keys use ``+`` notation::
         },
     }
 
-A single file can hold multiple BankSets as a list::
+A single file can hold several BankSets as a list in square brackets::
 
     [
         {
@@ -645,7 +683,7 @@ A single file can hold multiple BankSets as a list::
 **BankSet options**
 
 Besides ``"name"``, ``"banks"`` and ``"active_bank"`` (default
-``"default"``), a BankSet dict may set its own ``"long_press_ms"``,
+``"default"``), a BankSet may set its own ``"long_press_ms"``,
 ``"multi_press_window_ms"``, ``"chord_window_ms"`` and ``"debounce_ms"``
 (see `Timing constants`_), ``"debug"`` (see `Debug output`_), and
 ``"data_offset"`` -- the numbering base for channels, default 1 (see
@@ -653,11 +691,11 @@ Besides ``"name"``, ``"banks"`` and ``"active_bank"`` (default
 
 **Global settings block**
 
-In a list-format file, the first item may be a settings dict with no
-``"banks"`` key.  Its only setting is ``"debug"``, which switches the
-dispatcher-level debug output and can be changed while the program runs
-(see `Debug output`_ and `Live reloading`_).  A single-dict file cannot
-have one.
+In a list-format file, the first item may be a block of settings in
+braces with no ``"banks"`` key.  Its only setting is ``"debug"``, which
+switches the dispatcher-level debug output and can be changed while the
+program runs (see `Debug output`_ and `Live reloading`_).  A file with a
+single BankSet cannot have one.
 
 Validate before running::
 
@@ -813,8 +851,8 @@ define are active -- the rest are ignored::
         ],
     },
 
-``"long"`` and ``"repeat"`` both require a momentary input (CC or NOTE) --
-not valid for PC keys.  They are mutually exclusive.  Works with NOTE
+Both ``"long"`` and ``"repeat"`` require a momentary input (CC or NOTE)
+-- not valid for PC keys.  They are mutually exclusive.  Works with NOTE
 keys too::
 
     "NOTE60": {
@@ -848,8 +886,8 @@ secondary action::
     },
 
 Behavior: on each first press, ``"single"`` fires immediately and is then
-forgotten.  ``"long"`` / ``"double"`` / ``"triple"`` / ``"repeat"`` still
-resolve at their normal times and fire in addition, never re-firing
+forgotten.  Any ``"long"``, ``"double"``, ``"triple"`` or ``"repeat"``
+still resolves at its normal time and fire in addition, never re-firing
 ``"single"``: the later presses of a double or triple do not fire it
 again.  Since the deferred action fires after the eager ``"single"`` has
 already acted, it must suit the state the single left behind; for a
@@ -880,9 +918,10 @@ and CC keys always wait the full window.
 
 .. important::
 
-   All labels for the same chord key must be in a single dict entry.
-   Python silently discards duplicate keys, so two separate entries for
-   ``"CC1+CC2"`` will lose the first one.  Always write::
+   All labels for the same chord key must be in a single entry.  When
+   the same key appears twice, only the last one is kept, silently, so
+   two separate entries for ``"CC1+CC2"`` will lose the first one.
+   Always write::
 
        "CC1+CC2": {
            "single": [...],
@@ -946,7 +985,8 @@ to.  The same bank entered by a switch without the key stays put.
   With nothing pending it does nothing.
 - **Timeout.**  At least 2000 ms, and longer than every ``long_ms``,
   ``multi_ms`` and chord window in the BankSet, so no gesture is still
-  being decided when it runs out.  ``--validate`` checks this.  Choose a
+  being decided when it runs out.  The ``--validate`` option checks this.
+  Choose a
   timeout comfortably longer than your pauses between presses in that
   bank: after a return, the next press is handled by the original bank.
 
@@ -981,7 +1021,7 @@ Entry keys
 ~~~~~~~~~~
 
 Besides the labeled sequences (``"single"``, ``"double"``, ``"triple"``,
-``"long"``, ``"repeat"``, and ``"a"``/``"b"`` for toggles), an entry dict
+``"long"``, ``"repeat"``, and ``"a"``/``"b"`` for toggles), an entry
 may hold these keys:
 
 ``"eager_single"``
@@ -1013,7 +1053,7 @@ may hold these keys:
 Sequence item reference
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-Each output in a sequence is a dict with the following keys:
+Each output in a sequence is written in braces, with the following keys:
 
 ``"send"`` *(required)*
     The event to send: ``"CC<n>"``, ``"PC<n>"``, or ``"NOTE<n>"`` -- or one
@@ -1129,8 +1169,8 @@ Timing constants
 ~~~~~~~~~~~~~~~~
 
 These defaults apply to every BankSet.  Each can be changed for one
-BankSet with the same key in its dict, and some also per key or on the
-command line, as listed:
+BankSet with the same key in its settings, and some also per key or on
+the command line, as listed:
 
 ``long_press_ms`` (default 500)
     Threshold for the ``"long"`` gesture.  Per key: ``"long_ms"``.
@@ -1156,8 +1196,8 @@ command line, as listed:
 ``repeat_delay_ms`` (default 500) and ``repeat_ms`` (default 100)
     Hold time before the first repeat fires, and the interval between
     later repeats.  Set per key only, with the same names; there are no
-    BankSet-wide or command-line versions.  ``"repeat_accel"`` tiers, also
-    per key, are described in `Mapping types`_.
+    BankSet-wide or command-line versions.  The ``"repeat_accel"`` tiers,
+    also per key, are described in `Mapping types`_.
 
 
 Sending to other programs
@@ -1207,7 +1247,7 @@ environment variables all work.  Some useful examples::
 .. warning::
 
    **Some tools take their commands on stdin, not as arguments.**
-   ``jack_transport`` is one: it is a command interpreter, so
+   The ``jack_transport`` tool is one: it is a command interpreter, so
    ``jack_transport locate 0`` fails (an error appears on stderr, which
    ``CMD`` shows in debug output).  Pipe the command in instead::
 
@@ -1257,8 +1297,8 @@ recording::
 Valid ``"transport"`` values:
 
 ``"locate <frame>"``
-    Reposition to *frame* samples from time zero.  ``0`` rewinds to the
-    beginning.  At 48 kHz, frame 48000 = 1 second.
+    Reposition to *frame* samples from time zero.  A frame of ``0`` rewinds
+    to the beginning.  At 48 kHz, frame 48000 = 1 second.
 
 ``"start"``
     Begin rolling.
@@ -1324,12 +1364,12 @@ opened at action time::
 
 Required keys: ``"host"``, ``"port"``, ``"address"``.
 
-``"address"`` must be a string starting with ``/``.
+The ``"address"`` must be a string starting with ``/``.
 
-``"args"`` is optional (default: no-argument message).  Each element
-must be ``int``, ``float``, or ``str``; booleans are not accepted.
+The ``"args"`` list is optional (default: no-argument message).  Each
+element must be ``int``, ``float``, or ``str``; booleans are not accepted.
 
-``"delay"`` is supported, as for ``CMD`` and ``JACK_TRANSPORT``.
+A ``"delay"`` is supported, as for ``CMD`` and ``JACK_TRANSPORT``.
 
 
 Timing and troubleshooting
@@ -1390,7 +1430,7 @@ behind it, so the remapper watches for this and prints a warning::
     [actition] WARNING: delayed MIDI send stuck 3.2s past due —
         _output_fn may be blocked (JACK graph stalled?): CtrlEvent(...)
 
-``JACK_TRANSPORT`` actions (``start``, ``stop``, ``locate <frame>``) also
+The ``JACK_TRANSPORT`` actions (``start``, ``stop``, ``locate <frame>``) also
 run in a background thread, so they never block MIDI handling, and are
 watched the same way.  A local JACK call normally returns in well under a
 second; one still running past that is almost certainly waiting on a
