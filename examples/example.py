@@ -5,13 +5,19 @@
 # Validate:   midi-remapper --validate example.py
 # List banks: midi-remapper --list-banks example.py
 #
-# This file is a plain Python dict literal -- a single dict (one BankSet)
-# or a list of dicts (multiple BankSets).  No imports, no function calls,
-# just data.  Comments use '#'.
+# This file is plain data; writing one needs no knowledge of Python.
+# Braces { ... } hold settings, each a name in quotes, a colon and a
+# value, followed by a comma.  In Python terms the braces are a dict and
+# the quoted names are its keys, and the comments below use those two
+# words in that sense.  A file holds one BankSet in braces, or several in
+# a list in square brackets [ ... ].  No imports, no function calls, just
+# data.  Comments use '#'.
 #
-# Chord keys use '+' notation: "CC1+CC2" instead of ("CC1", "CC2").
+# Each mapping is named after the event of its input, its event name:
+# "CC5" for control change 5, "NOTE60" for note 60, "PC3" for program
+# change 3.  A chord joins event names with '+': "CC1+CC2".
 #
-# Event key names are case-insensitive: "cc5" works identically to "CC5",
+# Event names are case-insensitive: "cc5" works identically to "CC5",
 # and "cc1+cc2" to "CC1+CC2".  Uppercase is conventional.
 #
 # Live reloading: midi-remapper watches this file for changes while
@@ -26,7 +32,7 @@
 # Dict with any of       -> gesture: single / double / triple tap or long hold
 #   single/double/
 #   triple/long/repeat
-# "CC1+CC2" key          -> chord: all keys must arrive within chord_window_ms
+# "CC1+CC2" name         -> chord: all inputs must arrive within chord_window_ms
 #
 # See the README or config.py for the full schema.
 #
@@ -119,7 +125,7 @@
 
             # Visual style for the --display / --no-titlebar window.
             # "_display" is stripped before MIDI mapping lookup; it does not
-            # interfere with any event key.  All keys are optional.
+            # interfere with any event name.  All keys are optional.
             #   "bg"        -- background color  (e.g. "#1a1a2e")
             #   "fg"        -- text color        (e.g. "#e0e0ff")
             #   "font_size" -- bank-name font size in points  (e.g. 72)
@@ -202,7 +208,7 @@
             #
             # Any combination of single / double / triple / long / repeat.
             # "long" and "repeat" require a momentary input (CC or NOTE) --
-            # they are not valid for PC keys.  "long" and "repeat" are
+            # they are not valid for PC inputs.  "long" and "repeat" are
             # mutually exclusive.
 
             # Single only -- fires immediately, zero latency.  Press-only.
@@ -217,7 +223,7 @@
             #     "triple": [{"send": "CC32", "value": 127}],
             # },
 
-            # Multi-press with a tighter per-key window.
+            # Multi-press with a tighter per-input window.
             # "CC3": {
             #     "single":   [{"send": "CC30", "value": 127}],
             #     "double":   [{"send": "CC31", "value": 127}],
@@ -230,7 +236,7 @@
             # "CC3": {
             #     "single":  [{"send": "CC30", "value": 127}],
             #     "long":    [{"send": "PC1"}],
-            #     "long_ms": 400,   # optional per-key override of long_press_ms
+            #     "long_ms": 400,   # optional per-input override of long_press_ms
             # },
 
             # Long + multi-press combined.  The multi window starts after a
@@ -255,7 +261,7 @@
             # action via hold or double-press.
 
             # Eager + long: CC30 fires instantly on tap, PC1 fires on hold.
-            # Without eager_single, CC30 would wait until key release.
+            # Without eager_single, CC30 would wait until button release.
             # "CC3": {
             #     "eager_single": True,
             #     "single":  [{"send": "CC30", "value": 127}],
@@ -320,13 +326,13 @@
             #     "repeat_ms":       100,
             # },
 
-            # Gesture on a NOTE key (works identically to CC).
+            # Gesture on a NOTE input (works identically to CC).
             # "NOTE60": {
             #     "single": [{"send": "CC30", "value": 127}],
             #     "long":   [{"send": "CC31", "value": 127}],
             # },
 
-            # Gesture on a PC key (single / double / triple only -- no long
+            # Gesture on a PC input (single / double / triple only -- no long
             # or repeat, since PC events have no release signal).
             # "PC4": {
             #     "single": [{"send": "CC30", "value": 127}],
@@ -348,7 +354,7 @@
 
             # ── CHORD ─────────────────────────────────────────────────────
             #
-            # All keys must arrive within chord_window_ms.  "long" is not
+            # All inputs must arrive within chord_window_ms.  "long" is not
             # valid in chord entries.
             #
             # Fast chord (all CC/NOTE members): a solo press falls back with
@@ -382,7 +388,7 @@
             #     "double": [{"send": "BANK", "bank": "layer3"}],
             # },
 
-            # Standard chord using PC keys.
+            # Standard chord using PC inputs.
             # "PC4+PC5": {
             #     "single": [{"send": "CC40", "value": 127}],
             # },
