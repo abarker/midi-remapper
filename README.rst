@@ -289,7 +289,7 @@ Command-line reference
 
 ``--multi-press-ms MS``
     Override the multi-press accumulation window (global default).
-    Individual keys can override this further with ``"multi_ms"`` in
+    Individual inputs can override this further with ``"multi_ms"`` in
     their entry.
 
 ``--chord-ms MS``
@@ -325,7 +325,8 @@ Command-line reference
     - The ``"single"`` of an ``"eager_single"`` entry, on the press
     - Outputs fired by a release: a ``"single"`` on quick release, and a
       fast-chord fallback
-    - Chord completions -- when all chord keys arrive within the window
+    - Chord completions -- when all inputs of a chord arrive within the
+      window
 
     The following features are **not synchronous** and fire via timer
     callbacks regardless of backend, so they see no timing benefit:
@@ -474,7 +475,7 @@ bank switch, so you can glance at it during a performance to confirm that
 a chord or double press registered correctly.
 
 The large text is the name of the active bank.  The small label above it is
-the **BankSet name** -- the ``"name"`` key of the BankSet in your config
+the **BankSet name** -- the ``"name"`` setting of the BankSet in your config
 file, not anything detected from the hardware.  In the screenshots at the
 top it is ``actition``, the name one config gives to the BankSet holding the
 mappings for its ActitioN footswitch.  When a config has several BankSets,
@@ -488,7 +489,7 @@ pending, the bank name has a border in the return bank's text color (see
 **Per-bank styling**
 
 Each bank can define its own background color, text color, font size,
-and window dimensions via a ``"_display"`` key placed directly inside the
+and window dimensions via a ``"_display"`` setting placed directly inside the
 bank in the config file::
 
     "banks": {
@@ -503,19 +504,18 @@ bank in the config file::
         },
     },
 
-All five keys are optional.  Any key omitted falls back to its own
-default (dark background, white text, 72-point font).  The
-``"_display"`` key is stripped before MIDI mapping lookup and does not
-interfere with any event key.
+All five are optional.  Any one omitted falls back to its own default
+(dark background, white text, 72-point font).  The ``"_display"``
+setting is not a mapping, so it does not interfere with any event name.
 
 Style changes take effect immediately on the next bank switch.  When the
 config file is reloaded live, the new styles are applied at once without
 needing to switch banks first.
 
-Available style keys:
+Available style settings:
 
 ==================  ===========================================
-Key                 Effect
+Setting             Effect
 ==================  ===========================================
 ``bg``              Background color (any Tk color string)
 ``fg``              Text color
@@ -555,7 +555,7 @@ the BankSet resets to its ``active_bank`` setting (usually ``"default"``).
 
 Pass ``--no-reload`` to disable file watching entirely.
 
-The ``"debug"`` key in a global settings block is one of the things that
+The ``"debug"`` setting in a global settings block is one of the things that
 can be toggled live::
 
     [
@@ -616,9 +616,13 @@ start: you can copy it and edit it.  The format is simple:
 - Each setting is a name in quotes, a colon and a value, followed by a
   comma: ``"name": "mycontroller",``.
 - A setting made of several settings uses braces too, like ``"banks"``
-  below, and a list uses square brackets, like the outputs of each key.
+  below, and a list uses square brackets, like the outputs of each mapping.
 - Text after ``#`` is a comment.
-- A chord joins its keys with ``+``: ``"CC3+CC4"``.
+- Each mapping starts with the *event name* of its input:
+  ``"CC5"`` for control change 5, ``"NOTE60"`` for note 60, ``"PC3"``
+  for program change 3.
+- A chord joins the event names of its inputs with ``+``:
+  ``"CC3+CC4"``.
 
 For those who know Python, the config file is a Python dict literal (or a list
 of them for several BankSets). It is read with ``ast.literal_eval``, so it is
@@ -692,7 +696,7 @@ Besides ``"name"``, ``"banks"`` and ``"active_bank"`` (default
 **Global settings block**
 
 In a list-format file, the first item may be a block of settings in
-braces with no ``"banks"`` key.  Its only setting is ``"debug"``, which
+braces with no ``"banks"`` setting.  Its only setting is ``"debug"``, which
 switches the dispatcher-level debug output and can be changed while the
 program runs (see `Debug output`_ and `Live reloading`_).  A file with a
 single BankSet cannot have one.
@@ -705,9 +709,9 @@ List available banks::
 
     midi-remapper --list-banks mycontroller.py
 
-**Key name case**
+**Event name case**
 
-Event key names are case-insensitive: ``"cc5"`` is equivalent to
+Event names are case-insensitive: ``"cc5"`` is equivalent to
 ``"CC5"``, and ``"note60"`` to ``"NOTE60"``.  Chord components are
 normalized individually, so ``"cc1+cc2"`` is the same as ``"CC1+CC2"``.
 Uppercase is conventional in examples and documentation.
@@ -729,13 +733,13 @@ suppress the release::
 .. note::
 
    **Gesture entries never emit a release message** -- unlike the direct
-   form above.  The source key's release is consumed; nothing mirroring
-   the key going up is ever sent.  Every output comes from a labeled
+   form above.  The input's release is consumed; nothing mirroring the
+   button going up is ever sent.  Every output comes from a labeled
    sequence (``single``, ``long``, ``double``, ``triple``, ``repeat``),
    carrying that sequence's own value.
 
    Output may still be *triggered* by the release.  With ``single`` +
-   ``long``, the single fires on release **only when the key was let go
+   ``long``, the single fires on release **only when the button was let go
    before ``long_ms``**; released after that threshold, the long fires
    instead (normally already dispatched by its timer).  Either way what
    goes out is that label's sequence -- which may contain any number of
@@ -743,9 +747,9 @@ suppress the release::
 
    The consumption holds even when ``single`` is the *only* label, which
    is easy to assume otherwise since that case fires immediately on press
-   exactly as a direct mapping does.  It still sends nothing when the key
-   is let go.  Consequently ``press_only`` has no purpose inside a gesture
-   entry.
+   exactly as a direct mapping does.  It still sends nothing when the
+   button is let go.  Consequently ``press_only`` has no purpose inside a
+   gesture entry.
 
    It matters downstream: a device expecting a momentary press-and-release
    pair sees only the press.  If a receiver treats the release as "end this
@@ -790,11 +794,11 @@ define are active -- the rest are ignored::
         "triple": [{"send": "CC30", "value": 127}],
     },
 
-    # Multi-press with per-key window override
+    # Multi-press with per-input window override
     "CC0": {
         "single":   [{"send": "CC10", "value": 127}],
         "double":   [{"send": "CC20", "value": 127}],
-        "multi_ms": 150,   # tighter window for this key only
+        "multi_ms": 150,   # tighter window for this input only
     },
 
     # Combined -- long fires at threshold; multi window starts after quick release
@@ -821,7 +825,7 @@ define are active -- the rest are ignored::
     },
 
     # Accelerating repeat -- different sequence and/or interval per tier.
-    # Each tier activates when the key has been held for after_ms or more.
+    # Each tier activates when the button has been held for after_ms or more.
     # Omit "repeat" in a tier to keep the current sequence and change
     # only the interval; omit "repeat_ms" to keep the current interval.
     "CC0": {
@@ -852,8 +856,8 @@ define are active -- the rest are ignored::
     },
 
 Both ``"long"`` and ``"repeat"`` require a momentary input (CC or NOTE)
--- not valid for PC keys.  They are mutually exclusive.  Works with NOTE
-keys too::
+-- not valid for PC inputs.  They are mutually exclusive.  Works with
+NOTE inputs too::
 
     "NOTE60": {
         "single": [{"send": "CC10", "value": 127}],
@@ -869,7 +873,7 @@ you need zero-latency looper hits but still want a hold or double-press for a
 secondary action::
 
     # Tap fires CC10 instantly; hold fires CC11 after the threshold.
-    # Without eager_single, single would wait until key release -- adding
+    # Without eager_single, single would wait until button release -- adding
     # up to long_press_ms of latency for a short tap.
     "CC5": {
         "eager_single": True,
@@ -894,7 +898,7 @@ already acted, it must suit the state the single left behind; for a
 looper, that usually means an action designed to reverse the single
 first.
 
-Constraints: ``"eager_single": True`` requires a ``"single"`` key.  A
+Constraints: ``"eager_single": True`` requires a ``"single"`` sequence.  A
 ``"BANK"`` send inside an eager ``"single"`` sequence is a validation
 error (switching banks mid-gesture corrupts deferred-action routing).
 Setting the flag with no deferred labels (only ``"single"`` defined)
@@ -903,7 +907,7 @@ fires ``"single"`` immediately in that case.
 
 **Chord**
 
-Fires when all keys of the chord arrive within the chord window
+Fires when all inputs of the chord arrive within the chord window
 (``chord_window_ms``, default 80 ms)::
 
     "CC1+CC2": {
@@ -911,15 +915,15 @@ Fires when all keys of the chord arrive within the chord window
         "double": [{"send": "BANK", "bank": "ardour"}],
     },
 
-All-CC or all-NOTE chords are **fast chords**: if only one key arrives and
-is then released, the window closes at once and that key's own mapping
-fires on the release, without waiting out the window.  Chords that mix PC
-and CC keys always wait the full window.
+All-CC or all-NOTE chords are **fast chords**: if only one input arrives
+and is then released, the window closes at once and that input's own
+mapping fires on the release, without waiting out the window.  Chords that
+mix PC and CC inputs always wait the full window.
 
 .. important::
 
-   All labels for the same chord key must be in a single entry.  When
-   the same key appears twice, only the last one is kept, silently, so
+   All labels for the same chord must be in a single entry.  When the
+   same event name appears twice, only the last one is kept, silently, so
    two separate entries for ``"CC1+CC2"`` will lose the first one.
    Always write::
 
@@ -966,9 +970,9 @@ A long press here switches to ``drums``; 4 seconds after the last pedal
 use there, the remapper switches back by itself, and the bank display
 changes with it.  While a return is pending, the bank name has a border
 in the ``"_display"`` text color (``"fg"``) of the bank it will return
-to.  The same bank entered by a switch without the key stays put.
+to.  The same bank entered by a switch without that setting stays put.
 
-- **Pedal use** is any press or release of a key mapped in the active
+- **Pedal use** is any press or release of an input mapped in the active
   bank.  Each one restarts the countdown.  Events not mapped in the
   active bank do not count.
 - **Held pedals.**  Where a mapping needs the release, a pedal held
@@ -1017,12 +1021,12 @@ above, left at a value above 0, holds the bank until it sends 0.
    the release does not matter.
 
 
-Entry keys
-~~~~~~~~~~
+Entry settings
+~~~~~~~~~~~~~~
 
 Besides the labeled sequences (``"single"``, ``"double"``, ``"triple"``,
 ``"long"``, ``"repeat"``, and ``"a"``/``"b"`` for toggles), an entry
-may hold these keys:
+may hold these settings:
 
 ``"eager_single"``
     ``True`` or ``False`` (default ``False``); gesture entries only.  When
@@ -1032,18 +1036,18 @@ may hold these keys:
     ``"single"``.  See `Mapping types`_ for examples and constraints.
 
 ``"long_ms"``
-    Long-press threshold for this key (see ``long_press_ms`` under `Timing
+    Long-press threshold for this input (see ``long_press_ms`` under `Timing
     constants`_).
 
 ``"multi_ms"``
-    Multi-press window for this key (see ``multi_press_window_ms``).
+    Multi-press window for this input (see ``multi_press_window_ms``).
 
 ``"repeat_delay_ms"``, ``"repeat_ms"``, ``"repeat_accel"``
-    Hold-repeat timing for this key (see `Mapping types`_ and `Timing
+    Hold-repeat timing for this input (see `Mapping types`_ and `Timing
     constants`_).
 
 ``"debounce_ms"``
-    Toggle debounce for this key (see ``debounce_ms``).
+    Toggle debounce for this input (see ``debounce_ms``).
 
 ``"trigger_value"``
     Only dispatch when the incoming value matches (see `Trigger value
@@ -1053,12 +1057,13 @@ may hold these keys:
 Sequence item reference
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-Each output in a sequence is written in braces, with the following keys:
+Each output in a sequence is written in braces, with the following
+settings:
 
 ``"send"`` *(required)*
     The event to send: ``"CC<n>"``, ``"PC<n>"``, or ``"NOTE<n>"`` -- or one
     of the special values ``"BANK"`` (switch banks; needs ``"bank"``),
-    ``"SNAPBACK_CANCEL"`` (cancel a pending snapback; no other keys),
+    ``"SNAPBACK_CANCEL"`` (cancel a pending snapback; no other settings),
     ``"CMD"`` (run a shell command; needs ``"cmd"``), ``"JACK_TRANSPORT"``
     (needs ``"transport"``) or ``"OSC"`` (needs ``"host"``, ``"port"``
     and ``"address"``).
@@ -1162,42 +1167,42 @@ Supported forms::
     "trigger_value": "<=64"         # less than or equal
     "trigger_value": [1, "64-127"]  # OR list
 
-Avoid ``0`` for CC keys: a CC with value 0 counts as a release.
+Avoid ``0`` for CC inputs: a CC with value 0 counts as a release.
 
 
 Timing constants
 ~~~~~~~~~~~~~~~~
 
 These defaults apply to every BankSet.  Each can be changed for one
-BankSet with the same key in its settings, and some also per key or on
-the command line, as listed:
+BankSet with a setting of the same name in that BankSet, and some also
+per input or on the command line, as listed:
 
 ``long_press_ms`` (default 500)
-    Threshold for the ``"long"`` gesture.  Per key: ``"long_ms"``.
+    Threshold for the ``"long"`` gesture.  Per input: ``"long_ms"``.
     Command line: ``--long-press-ms``.
 
 ``multi_press_window_ms`` (default 300)
     Accumulation window for double/triple press (gesture and chord).  Per
-    key: ``"multi_ms"``.  Command line: ``--multi-press-ms``::
+    input: ``"multi_ms"``.  Command line: ``--multi-press-ms``::
 
         "CC0": {
             "single": [{"send": "CC10", "value": 127}],
             "double": [{"send": "CC20", "value": 127}],
-            "multi_ms": 150,   # tighter window just for this key
+            "multi_ms": 150,   # tighter window just for this input
         },
 
 ``chord_window_ms`` (default 80)
-    Window within which all chord keys must arrive.  Command line:
+    Window within which all inputs of a chord must arrive.  Command line:
     ``--chord-ms``.
 
 ``debounce_ms`` (default 60)
-    Minimum time between toggle triggers.  Per key: ``"debounce_ms"``.
+    Minimum time between toggle triggers.  Per input: ``"debounce_ms"``.
 
 ``repeat_delay_ms`` (default 500) and ``repeat_ms`` (default 100)
     Hold time before the first repeat fires, and the interval between
-    later repeats.  Set per key only, with the same names; there are no
+    later repeats.  Set per input only, with the same names; there are no
     BankSet-wide or command-line versions.  The ``"repeat_accel"`` tiers,
-    also per key, are described in `Mapping types`_.
+    also per input, are described in `Mapping types`_.
 
 
 Sending to other programs
@@ -1306,7 +1311,7 @@ Valid ``"transport"`` values:
 ``"stop"``
     Stop rolling.
 
-The ``"delay"`` key is supported, same as for ``CMD``.
+The ``"delay"`` setting is supported, same as for ``CMD``.
 
 The ``midi_remapper_ctrl`` client is portless and appears as a passive
 entry in the JACK client list.  No port connections are needed.
@@ -1362,7 +1367,7 @@ opened at action time::
                     "address": "/transport/locate", "args": [0]}],
     },
 
-Required keys: ``"host"``, ``"port"``, ``"address"``.
+Required settings: ``"host"``, ``"port"``, ``"address"``.
 
 The ``"address"`` must be a string starting with ``/``.
 
@@ -1387,9 +1392,9 @@ Latency summary
 +-----------------------------------+------------------------------+
 | Toggle                            | Immediately on press (~0ms)  |
 +-----------------------------------+------------------------------+
-| Chord (complete)                  | When last key arrives (~0ms) |
+| Chord (complete)                  | Last input arrives (~0ms)    |
 +-----------------------------------+------------------------------+
-| Fast chord fallback               | On key release (~0ms)        |
+| Fast chord fallback               | On input release (~0ms)      |
 +-----------------------------------+------------------------------+
 | Standard chord fallback           | After chord_window_ms (80 ms)|
 +-----------------------------------+------------------------------+
