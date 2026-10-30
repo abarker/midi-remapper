@@ -1046,7 +1046,7 @@ Each output in a sequence is a dict with the following keys:
     Seconds to wait before sending (default 0).  Values up to 1 ms
     (``0.001``) send at once, as if there were no delay -- handy when trying
     out delay values without changing the format; the smallest value that
-    actually waits is ``0.002`` (2 ms).  Delayed sends run in a background
+    actually waits is ``0.002`` (2 ms).  Delayed sends run on the timer
     thread; see `Stuck-send warnings`_.
 
 ``"channel"``
@@ -1196,10 +1196,12 @@ command line, as listed:
 Stuck-send warnings
 -------------------
 
-Delayed sends (``"delay"``) run in a background thread.  If the JACK
-graph stalls while a delayed send is pending, that thread may block
-silently while handing the event to JACK.  The remapper notices this and
-prints a warning::
+Delayed sends (``"delay"``) run on the remapper's one timer thread, with
+every other timed output: long, double and triple press, repeats, chord
+windows and the snapback.  Handing a MIDI event to mididings waits only
+while the remapper's own MIDI handler is running, normally well under a
+millisecond.  A send held up longer also holds up every timed output
+behind it, so the remapper watches for this and prints a warning::
 
     [actition] WARNING: delayed MIDI send stuck 3.2s past due —
         _output_fn may be blocked (JACK graph stalled?): CtrlEvent(...)
@@ -1215,9 +1217,11 @@ known cause)::
     [actition] WARNING: JACK transport call stuck 2.1s —
         jack.Client call may be blocked (JACK graph stalled?): locate 0
 
-Each warning prints once per stuck thread, so repeated stalls each give
-exactly one line.  If the graph recovers (for example, the blocking client
-is killed), the thread unblocks and finishes normally.  The check runs
+The likely cause of a stuck MIDI send is a mididings release without the
+deadlock fix (see `Installation`_).  Each warning prints once per stuck
+send or call, so repeated stalls each give exactly one line.  If the
+cause clears (for example, the blocking client is killed), the send or
+call finishes normally.  The check runs
 periodically, so it reports a hang some time after it starts, not at the
 instant; and a config reload stops the watch on any calls already in
 progress.
