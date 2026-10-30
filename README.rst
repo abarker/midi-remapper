@@ -40,8 +40,11 @@ in colors set per bank, so a bank switch can be confirmed at a glance
    :depth: 2
    :local:
 
+Getting started
+---------------
+
 Installation
-------------
+~~~~~~~~~~~~
 
 The package is not on PyPI.  Clone the repository first::
 
@@ -154,8 +157,9 @@ bridged into JACK with ``a2jmidid``.  The community-maintained
 although that has not currently been tested here; mididings does not
 support Windows.
 
+
 Quick start
------------
+~~~~~~~~~~~
 
 1. Start JACK (e.g. open QjackCtl and press Start).
 2. Create a config file ``mycontroller.py`` (see `Config files`_ below).
@@ -167,8 +171,9 @@ Quick start
    ``midi_remapper:in_0`` and ``midi_remapper:out_0`` to
    your target application, using QjackCtl's Graph or ``jack_connect``.
 
+
 Running without activating a venv
--------------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 If you installed inside a venv, pip (with or without ``-e``) writes that
 venv's own interpreter into the installed ``midi-remapper`` command as an
@@ -187,8 +192,30 @@ per tool with an absolute-shebang console script -- with the added
 convenience that ``pipx ensurepath`` puts it on ``PATH`` for you
 automatically.
 
+
+JACK connection
+~~~~~~~~~~~~~~~
+
+After starting ``midi-remapper``, connect ports in QjackCtl Graph or
+with ``jack_connect``::
+
+    jack_connect \
+        "a2j:MyController [20] (capture): MyController MIDI 1" \
+        "midi_remapper:in_0"
+
+    jack_connect \
+        "midi_remapper:out_0" \
+        "Hydrogen-midi:RX"
+
+The client name ``midi_remapper`` can be changed with ``--client-name NAME``
+on the command line, or permanently via ``CLIENT_NAME`` in ``config.py``.
+
+
+Running
+-------
+
 Command-line reference
-----------------------
+~~~~~~~~~~~~~~~~~~~~~~
 
 ::
 
@@ -412,10 +439,151 @@ Command-line reference
 ``--client-name NAME``
     Override the JACK client name for this session (default: ``CLIENT_NAME``
     in ``config.py``, ``"midi_remapper"``).  Useful when running multiple
-    instances simultaneously.  See also `JACK connection`_ below.
+    instances simultaneously.  See also `JACK connection`_.
+
+
+Bank display window
+~~~~~~~~~~~~~~~~~~~
+
+Run with ``--display`` to open a floating window showing the current bank
+name in a large, easy-to-read font::
+
+    midi-remapper mycontroller.py --display
+
+Add ``--no-titlebar`` to remove the OS title bar for a more compact display::
+
+    midi-remapper mycontroller.py --no-titlebar
+
+In titlebar-less mode, right-click anywhere on the window for a menu with
+**Exit** (quit the program) and **Cancel** (dismiss the menu).
+
+The window stays on top of other windows and updates immediately on every
+bank switch, so you can glance at it during a performance to confirm that
+a chord or double press registered correctly.
+
+The large text is the name of the active bank.  The small label above it is
+the **BankSet name** -- the ``"name"`` key of the BankSet in your config
+file, not anything detected from the hardware.  In the screenshots at the
+top it is ``actition``, the name one config gives to the BankSet holding the
+mappings for its ActitioN footswitch.  When a config has several BankSets,
+the window shows whichever one last switched banks (at startup, the first
+BankSet that has more than one bank or starts on a bank other than
+``"default"``).  The colors come from each bank's
+``"_display"`` style (see *Per-bank styling* below).  While a snapback is
+pending, the bank name has a border in the return bank's text color (see
+"Snapback" under `Mapping types`_).
+
+**Per-bank styling**
+
+Each bank can define its own background color, text color, font size,
+and window dimensions via a ``"_display"`` key placed directly inside the
+bank dict in the config file::
+
+    "banks": {
+        "default": {
+            "_display": {"bg": "#1a1a2e", "fg": "#e0e0ff"},
+            "CC0": [{"send": "CC10", "press_only": True}],
+        },
+        "drums": {
+            "_display": {"bg": "#1a2e1a", "fg": "#a0ffb0",
+                         "font_size": 80, "width": 400, "height": 200},
+            "CC0": [{"send": "CC11", "press_only": True}],
+        },
+    },
+
+All five keys are optional.  Any key omitted falls back to its own
+default (dark background, white text, 72-point font).  ``"_display"`` is
+stripped before MIDI mapping lookup and does not interfere with any
+event key.
+
+Style changes take effect immediately on the next bank switch.  When the
+config file is reloaded live, the new styles are applied at once without
+needing to switch banks first.
+
+Available style keys:
+
+==================  ===========================================
+Key                 Effect
+==================  ===========================================
+``bg``              Background color (any Tk color string)
+``fg``              Text color
+``font_size``       Bank-name font size in points
+``width``           Window width in pixels
+``height``          Window height in pixels
+==================  ===========================================
+
+
+Live reloading
+~~~~~~~~~~~~~~
+
+When one or more config files are passed on the command line,
+``midi-remapper`` watches them for changes and reloads them automatically
+while the program is running.  This makes it easy to experiment with
+mappings without restarting:
+
+1. Start ``midi-remapper`` as usual::
+
+       midi-remapper mycontroller.py
+
+2. Edit and save ``mycontroller.py`` in your text editor.
+3. The program detects the change within about one second and prints::
+
+       [reload] mycontroller.py changed, reloading...
+       [reload] mycontroller.py: OK  (active banks: mycontroller=default)
+
+   Your new mappings take effect immediately.
+
+If the file contains a syntax or validation error, the current config is
+kept and an error message is printed -- the program keeps running on the
+last good config.  Fix the error and save again to retry.
+
+The currently active bank is preserved across reloads when the bank name
+still exists in the new config.  If you rename or remove the active bank,
+the BankSet resets to its ``active_bank`` setting (usually ``"default"``).
+
+Pass ``--no-reload`` to disable file watching entirely.
+
+The ``"debug"`` key in a global settings block is one of the things that
+can be toggled live::
+
+    [
+        {"debug": True},
+        {"name": "main", "banks": { ... }},
+    ]
+
+Changing ``"debug"`` from ``False`` to ``True`` and saving will enable
+dispatcher-level output immediately without restarting.
+
+
+Debug output
+~~~~~~~~~~~~
+
+Two independent debug flags control what is printed:
+
+Dispatcher level
+    Prints ``[in]`` (every incoming event), ``[dispatch]`` (which BankSet
+    handled it), and startup messages.  Turn it on with ``--debug``, with
+    ``"debug": True`` in a config file's global settings block (which can
+    be changed while running), or with ``DEBUG`` in the package's
+    ``config.py``.
+
+BankSet level
+    Prints ``[BankSet:name] handle key=...``, gesture timing, chord
+    windows, and sequence dispatch detail for one BankSet.  Turn it on with
+    ``"debug": True`` inside that BankSet's dict.
+
+The ``--debug`` CLI flag sets both levels simultaneously and is the
+simplest way to get full output.  Setting ``"debug": True`` inside a
+BankSet dict gives internal trace for that BankSet only, without the
+dispatcher-level wrapper lines.  This is useful when you have multiple
+BankSets and want to trace only one without flooding the terminal.
+
+
+Configuration
+-------------
 
 Config files
-------------
+~~~~~~~~~~~~
 
 A ``.py`` file is a plain Python data literal -- no imports, no function
 calls, just a dict (single BankSet) or list of dicts (multiple BankSets).
@@ -506,8 +674,9 @@ Event key names are case-insensitive: ``"cc5"`` is equivalent to
 normalized individually, so ``"cc1+cc2"`` is the same as ``"CC1+CC2"``.
 Uppercase is conventional in examples and documentation.
 
+
 Mapping types
--------------
+~~~~~~~~~~~~~
 
 **Direct**
 
@@ -807,215 +976,42 @@ above, left at a value above 0, holds the bank until it sends 0.
    pedal, since it has no releases to skip, and the remapper then knows
    the release does not matter.
 
-Shell commands
---------------
 
-Use ``"CMD"`` to run an arbitrary shell command when an event fires.
-The command runs in a background thread and does not block the MIDI
-handler.  stdout and stderr are printed when ``--debug`` is active::
+Entry keys
+~~~~~~~~~~
 
-    # Single command
-    "CC3": [{"send": "CMD",
-             "cmd": "jack_connect system:capture_1 sooperlooper:common_in_1"}],
+Besides the labeled sequences (``"single"``, ``"double"``, ``"triple"``,
+``"long"``, ``"repeat"``, and ``"a"``/``"b"`` for toggles), an entry dict
+may hold these keys:
 
-    # Combined with MIDI output
-    "CC3": [
-        {"send": "CC10", "value": 127},
-        {"send": "CMD",  "cmd": "notify-send 'Take armed'"},
-    ],
+``"eager_single"``
+    ``True`` or ``False`` (default ``False``); gesture entries only.  When
+    ``True``, the ``"single"`` sequence fires immediately on the first press,
+    and ``"long"``, ``"double"``, ``"triple"`` and ``"repeat"`` still resolve
+    normally afterward -- removing the wait they would otherwise put on
+    ``"single"``.  See `Mapping types`_ for examples and constraints.
 
-    # On a long press
-    "CC3": {
-        "single": [{"send": "CMD", "cmd": "amixer -q set Master 5%+"}],
-        "long":   [{"send": "CMD", "cmd": "$HOME/bin/next-song.sh"}],
-    },
+``"long_ms"``
+    Long-press threshold for this key (see ``long_press_ms`` under `Timing
+    constants`_).
 
-    # Chord that switches bank AND runs a command
-    "CC3+CC4": {
-        "single": [
-            {"send": "BANK", "bank": "drums"},
-            {"send": "CMD",  "cmd": "echo drums > /tmp/current_bank.txt"},
-        ],
-    },
+``"multi_ms"``
+    Multi-press window for this key (see ``multi_press_window_ms``).
 
-Commands run via the shell (``shell=True``), so pipes, redirects, and
-environment variables all work.  Some useful examples::
+``"repeat_delay_ms"``, ``"repeat_ms"``, ``"repeat_accel"``
+    Hold-repeat timing for this key (see `Mapping types`_ and `Timing
+    constants`_).
 
-    jack_connect system:capture_1 sooperlooper:common_in_1
-    jack_disconnect system:capture_1 sooperlooper:common_in_1
-    aconnect 14:0 128:0
-    amixer -q set Master 5%+
-    echo 120 > /tmp/bpm.txt
-    notify-send "Bank: drums"
+``"debounce_ms"``
+    Toggle debounce for this key (see ``debounce_ms``).
 
-.. warning::
+``"trigger_value"``
+    Only dispatch when the incoming value matches (see `Trigger value
+    filtering`_).
 
-   **Some tools take their commands on stdin, not as arguments.**
-   ``jack_transport`` is one: it is a command interpreter, so
-   ``jack_transport locate 0`` fails (an error appears on stderr, which
-   ``CMD`` shows in debug output).  Pipe the command in instead::
-
-       echo 'locate 0' | jack_transport
-
-   For transport control specifically, ``JACK_TRANSPORT`` (next section)
-   is better still: no subprocess at all.
-
-   Related caution: ``CMD`` does not redirect stdin, so a command that
-   *blocks* waiting for input would hang indefinitely, leaking a
-   subprocess and a thread per trigger with nothing to report it.  Redirect
-   explicitly (``</dev/null`` or a pipe) for anything that might read
-   stdin.
-
-JACK transport control
-----------------------
-
-Use ``JACK_TRANSPORT`` to control JACK transport (play, stop, locate)
-without spawning a subprocess.  A persistent JACK client
-(``midi_remapper_ctrl``) is opened once when a ``JACK_TRANSPORT`` action
-is detected in a config file during loading; all subsequent actions reuse
-the same connection.  Because no ``fork``/``exec`` occurs and no new JACK
-client is registered at action time, recording clients are not disturbed.
-Prefer this over ``CMD`` with ``jack_transport`` when other clients are
-recording::
-
-    # Rewind to the start of the timeline.
-    "CC6": [{"send": "JACK_TRANSPORT", "transport": "locate 0"}],
-
-    # Start and stop rolling.
-    "CC7": [{"send": "JACK_TRANSPORT", "transport": "start"}],
-    "CC8": [{"send": "JACK_TRANSPORT", "transport": "stop"}],
-
-    # Stop and rewind on a gesture.
-    "CC6": {
-        "single": [{"send": "JACK_TRANSPORT", "transport": "stop"}],
-        "long":   [{"send": "JACK_TRANSPORT", "transport": "locate 0"}],
-    },
-
-    # Combined with a MIDI output in the same sequence.
-    "CC6": [
-        {"send": "CC60", "value": 127},
-        {"send": "JACK_TRANSPORT", "transport": "locate 0"},
-    ],
-
-Valid ``"transport"`` values:
-
-``"locate <frame>"``
-    Reposition to *frame* samples from time zero.  ``0`` rewinds to the
-    beginning.  At 48 kHz, frame 48000 = 1 second.
-
-``"start"``
-    Begin rolling.
-
-``"stop"``
-    Stop rolling.
-
-The ``"delay"`` key is supported, same as for ``CMD``.
-
-The ``midi_remapper_ctrl`` client is portless and appears as a passive
-entry in the JACK client list.  No port connections are needed.
-
-OSC sends
----------
-
-Use ``"OSC"`` to send an OSC message over UDP when an event fires.
-
-One ``SimpleUDPClient`` is created per ``(host, port)`` target when the
-config is loaded and reused for every subsequent send -- no new socket is
-opened at action time::
-
-    # Simple no-argument message.
-    "CC5": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
-             "address": "/ping"}],
-
-    # With typed arguments: int, float, and str are all valid.
-    "CC5": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
-             "address": "/record/arm", "args": [1]}],
-
-    "CC5": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
-             "address": "/fader/level", "args": [0.75]}],
-
-    "CC5": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
-             "address": "/scene/load", "args": ["verse"]}],
-
-    # Multiple arguments in one message.
-    "CC5": [{"send": "OSC", "host": "10.0.0.5", "port": 7400,
-             "address": "/channel/set", "args": [1, 0.8, "armed"]}],
-
-    # Multiple targets in one sequence.
-    "CC5": [
-        {"send": "OSC", "host": "127.0.0.1", "port": 9000,
-         "address": "/local/trigger"},
-        {"send": "OSC", "host": "10.0.0.5",  "port": 7400,
-         "address": "/remote/trigger"},
-    ],
-
-    # Combined with a MIDI output and delayed.
-    "CC5": [
-        {"send": "CC50", "value": 127},
-        {"send": "OSC",  "host": "127.0.0.1", "port": 9000,
-         "address": "/cue/fire", "delay": 0.1},
-    ],
-
-    # On a gesture.
-    "CC5": {
-        "single": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
-                    "address": "/transport/stop"}],
-        "long":   [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
-                    "address": "/transport/locate", "args": [0]}],
-    },
-
-Required keys: ``"host"``, ``"port"``, ``"address"``.
-
-``"address"`` must be a string starting with ``/``.
-
-``"args"`` is optional (default: no-argument message).  Each element
-must be ``int``, ``float``, or ``str``; booleans are not accepted.
-
-``"delay"`` is supported, as for ``CMD`` and ``JACK_TRANSPORT``.
-
-Latency summary
----------------
-
-+-----------------------------------+------------------------------+
-| Feature                           | When output fires            |
-+===================================+==============================+
-| Direct                            | Immediately on press (~0ms)  |
-+-----------------------------------+------------------------------+
-| Gesture single only               | Immediately on press (~0ms)  |
-+-----------------------------------+------------------------------+
-| Toggle                            | Immediately on press (~0ms)  |
-+-----------------------------------+------------------------------+
-| Chord (complete)                  | When last key arrives (~0ms) |
-+-----------------------------------+------------------------------+
-| Fast chord fallback               | On key release (~0ms)        |
-+-----------------------------------+------------------------------+
-| Standard chord fallback           | After chord_window_ms (80 ms)|
-+-----------------------------------+------------------------------+
-| Gesture multi-press               | After multi_press_window_ms  |
-|                                   | (300 ms default)             |
-+-----------------------------------+------------------------------+
-| Gesture long                      | At the long-press threshold  |
-+-----------------------------------+------------------------------+
-| Gesture single + long (single)    | On quick release             |
-+-----------------------------------+------------------------------+
-| Gesture eager_single (single)     | Immediately on press (~0ms)  |
-+-----------------------------------+------------------------------+
-| Gesture eager_single (long/double)| At their normal times        |
-+-----------------------------------+------------------------------+
-| Gesture repeat (first)            | After repeat_delay_ms (500ms)|
-+-----------------------------------+------------------------------+
-| Gesture repeat (subsequent)       | Every repeat_ms (100ms)      |
-+-----------------------------------+------------------------------+
-| Gesture single + repeat (single)  | On quick release if no       |
-|                                   | repeat has fired yet         |
-+-----------------------------------+------------------------------+
-
-The times are the remapper's own.  The default buffered backend adds one
-JACK period to each; ``--jack-rt`` removes that period for the entries
-that fire immediately (see ``--jack-rt`` above).
 
 Sequence item reference
------------------------
+~~~~~~~~~~~~~~~~~~~~~~~
 
 Each output in a sequence is a dict with the following keys:
 
@@ -1106,40 +1102,9 @@ Each output in a sequence is a dict with the following keys:
     Using ``"velocity"`` on a CC send or ``"value"`` on a NOTE send is a
     config error caught by ``--validate`` at startup.
 
-Entry keys
-----------
-
-Besides the labeled sequences (``"single"``, ``"double"``, ``"triple"``,
-``"long"``, ``"repeat"``, and ``"a"``/``"b"`` for toggles), an entry dict
-may hold these keys:
-
-``"eager_single"``
-    ``True`` or ``False`` (default ``False``); gesture entries only.  When
-    ``True``, the ``"single"`` sequence fires immediately on the first press,
-    and ``"long"``, ``"double"``, ``"triple"`` and ``"repeat"`` still resolve
-    normally afterward -- removing the wait they would otherwise put on
-    ``"single"``.  See `Mapping types`_ for examples and constraints.
-
-``"long_ms"``
-    Long-press threshold for this key (see ``long_press_ms`` under `Timing
-    constants`_).
-
-``"multi_ms"``
-    Multi-press window for this key (see ``multi_press_window_ms``).
-
-``"repeat_delay_ms"``, ``"repeat_ms"``, ``"repeat_accel"``
-    Hold-repeat timing for this key (see `Mapping types`_ and `Timing
-    constants`_).
-
-``"debounce_ms"``
-    Toggle debounce for this key (see ``debounce_ms``).
-
-``"trigger_value"``
-    Only dispatch when the incoming value matches (see `Trigger value
-    filtering`_).
 
 Trigger value filtering
------------------------
+~~~~~~~~~~~~~~~~~~~~~~~
 
 Add ``"trigger_value"`` to a gesture or direct entry to only dispatch
 when the incoming value matches::
@@ -1159,8 +1124,9 @@ Supported forms::
 
 Avoid ``0`` for CC keys: a CC with value 0 counts as a release.
 
+
 Timing constants
-----------------
+~~~~~~~~~~~~~~~~
 
 These defaults apply to every BankSet.  Each can be changed for one
 BankSet with the same key in its dict, and some also per key or on the
@@ -1193,8 +1159,226 @@ command line, as listed:
     BankSet-wide or command-line versions.  ``"repeat_accel"`` tiers, also
     per key, are described in `Mapping types`_.
 
+
+Sending to other programs
+-------------------------
+
+Shell commands
+~~~~~~~~~~~~~~
+
+Use ``"CMD"`` to run an arbitrary shell command when an event fires.
+The command runs in a background thread and does not block the MIDI
+handler.  stdout and stderr are printed when ``--debug`` is active::
+
+    # Single command
+    "CC3": [{"send": "CMD",
+             "cmd": "jack_connect system:capture_1 sooperlooper:common_in_1"}],
+
+    # Combined with MIDI output
+    "CC3": [
+        {"send": "CC10", "value": 127},
+        {"send": "CMD",  "cmd": "notify-send 'Take armed'"},
+    ],
+
+    # On a long press
+    "CC3": {
+        "single": [{"send": "CMD", "cmd": "amixer -q set Master 5%+"}],
+        "long":   [{"send": "CMD", "cmd": "$HOME/bin/next-song.sh"}],
+    },
+
+    # Chord that switches bank AND runs a command
+    "CC3+CC4": {
+        "single": [
+            {"send": "BANK", "bank": "drums"},
+            {"send": "CMD",  "cmd": "echo drums > /tmp/current_bank.txt"},
+        ],
+    },
+
+Commands run via the shell (``shell=True``), so pipes, redirects, and
+environment variables all work.  Some useful examples::
+
+    jack_connect system:capture_1 sooperlooper:common_in_1
+    jack_disconnect system:capture_1 sooperlooper:common_in_1
+    aconnect 14:0 128:0
+    amixer -q set Master 5%+
+    echo 120 > /tmp/bpm.txt
+    notify-send "Bank: drums"
+
+.. warning::
+
+   **Some tools take their commands on stdin, not as arguments.**
+   ``jack_transport`` is one: it is a command interpreter, so
+   ``jack_transport locate 0`` fails (an error appears on stderr, which
+   ``CMD`` shows in debug output).  Pipe the command in instead::
+
+       echo 'locate 0' | jack_transport
+
+   For transport control specifically, ``JACK_TRANSPORT`` (next section)
+   is better still: no subprocess at all.
+
+   Related caution: ``CMD`` does not redirect stdin, so a command that
+   *blocks* waiting for input would hang indefinitely, leaking a
+   subprocess and a thread per trigger with nothing to report it.  Redirect
+   explicitly (``</dev/null`` or a pipe) for anything that might read
+   stdin.
+
+
+JACK transport control
+~~~~~~~~~~~~~~~~~~~~~~
+
+Use ``JACK_TRANSPORT`` to control JACK transport (play, stop, locate)
+without spawning a subprocess.  A persistent JACK client
+(``midi_remapper_ctrl``) is opened once when a ``JACK_TRANSPORT`` action
+is detected in a config file during loading; all subsequent actions reuse
+the same connection.  Because no ``fork``/``exec`` occurs and no new JACK
+client is registered at action time, recording clients are not disturbed.
+Prefer this over ``CMD`` with ``jack_transport`` when other clients are
+recording::
+
+    # Rewind to the start of the timeline.
+    "CC6": [{"send": "JACK_TRANSPORT", "transport": "locate 0"}],
+
+    # Start and stop rolling.
+    "CC7": [{"send": "JACK_TRANSPORT", "transport": "start"}],
+    "CC8": [{"send": "JACK_TRANSPORT", "transport": "stop"}],
+
+    # Stop and rewind on a gesture.
+    "CC6": {
+        "single": [{"send": "JACK_TRANSPORT", "transport": "stop"}],
+        "long":   [{"send": "JACK_TRANSPORT", "transport": "locate 0"}],
+    },
+
+    # Combined with a MIDI output in the same sequence.
+    "CC6": [
+        {"send": "CC60", "value": 127},
+        {"send": "JACK_TRANSPORT", "transport": "locate 0"},
+    ],
+
+Valid ``"transport"`` values:
+
+``"locate <frame>"``
+    Reposition to *frame* samples from time zero.  ``0`` rewinds to the
+    beginning.  At 48 kHz, frame 48000 = 1 second.
+
+``"start"``
+    Begin rolling.
+
+``"stop"``
+    Stop rolling.
+
+The ``"delay"`` key is supported, same as for ``CMD``.
+
+The ``midi_remapper_ctrl`` client is portless and appears as a passive
+entry in the JACK client list.  No port connections are needed.
+
+
+OSC sends
+~~~~~~~~~
+
+Use ``"OSC"`` to send an OSC message over UDP when an event fires.
+
+One ``SimpleUDPClient`` is created per ``(host, port)`` target when the
+config is loaded and reused for every subsequent send -- no new socket is
+opened at action time::
+
+    # Simple no-argument message.
+    "CC5": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+             "address": "/ping"}],
+
+    # With typed arguments: int, float, and str are all valid.
+    "CC5": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+             "address": "/record/arm", "args": [1]}],
+
+    "CC5": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+             "address": "/fader/level", "args": [0.75]}],
+
+    "CC5": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+             "address": "/scene/load", "args": ["verse"]}],
+
+    # Multiple arguments in one message.
+    "CC5": [{"send": "OSC", "host": "10.0.0.5", "port": 7400,
+             "address": "/channel/set", "args": [1, 0.8, "armed"]}],
+
+    # Multiple targets in one sequence.
+    "CC5": [
+        {"send": "OSC", "host": "127.0.0.1", "port": 9000,
+         "address": "/local/trigger"},
+        {"send": "OSC", "host": "10.0.0.5",  "port": 7400,
+         "address": "/remote/trigger"},
+    ],
+
+    # Combined with a MIDI output and delayed.
+    "CC5": [
+        {"send": "CC50", "value": 127},
+        {"send": "OSC",  "host": "127.0.0.1", "port": 9000,
+         "address": "/cue/fire", "delay": 0.1},
+    ],
+
+    # On a gesture.
+    "CC5": {
+        "single": [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+                    "address": "/transport/stop"}],
+        "long":   [{"send": "OSC", "host": "127.0.0.1", "port": 9000,
+                    "address": "/transport/locate", "args": [0]}],
+    },
+
+Required keys: ``"host"``, ``"port"``, ``"address"``.
+
+``"address"`` must be a string starting with ``/``.
+
+``"args"`` is optional (default: no-argument message).  Each element
+must be ``int``, ``float``, or ``str``; booleans are not accepted.
+
+``"delay"`` is supported, as for ``CMD`` and ``JACK_TRANSPORT``.
+
+
+Timing and troubleshooting
+--------------------------
+
+Latency summary
+~~~~~~~~~~~~~~~
+
++-----------------------------------+------------------------------+
+| Feature                           | When output fires            |
++===================================+==============================+
+| Direct                            | Immediately on press (~0ms)  |
++-----------------------------------+------------------------------+
+| Gesture single only               | Immediately on press (~0ms)  |
++-----------------------------------+------------------------------+
+| Toggle                            | Immediately on press (~0ms)  |
++-----------------------------------+------------------------------+
+| Chord (complete)                  | When last key arrives (~0ms) |
++-----------------------------------+------------------------------+
+| Fast chord fallback               | On key release (~0ms)        |
++-----------------------------------+------------------------------+
+| Standard chord fallback           | After chord_window_ms (80 ms)|
++-----------------------------------+------------------------------+
+| Gesture multi-press               | After multi_press_window_ms  |
+|                                   | (300 ms default)             |
++-----------------------------------+------------------------------+
+| Gesture long                      | At the long-press threshold  |
++-----------------------------------+------------------------------+
+| Gesture single + long (single)    | On quick release             |
++-----------------------------------+------------------------------+
+| Gesture eager_single (single)     | Immediately on press (~0ms)  |
++-----------------------------------+------------------------------+
+| Gesture eager_single (long/double)| At their normal times        |
++-----------------------------------+------------------------------+
+| Gesture repeat (first)            | After repeat_delay_ms (500ms)|
++-----------------------------------+------------------------------+
+| Gesture repeat (subsequent)       | Every repeat_ms (100ms)      |
++-----------------------------------+------------------------------+
+| Gesture single + repeat (single)  | On quick release if no       |
+|                                   | repeat has fired yet         |
++-----------------------------------+------------------------------+
+
+The times are the remapper's own.  The default buffered backend adds one
+JACK period to each; ``--jack-rt`` removes that period for the entries
+that fire immediately (see ``--jack-rt`` above).
+
+
 Stuck-send warnings
--------------------
+~~~~~~~~~~~~~~~~~~~
 
 Delayed sends (``"delay"``) run on the remapper's one timer thread, with
 every other timed output: long, double and triple press, repeats, chord
@@ -1226,156 +1410,6 @@ periodically, so it reports a hang some time after it starts, not at the
 instant; and a config reload stops the watch on any calls already in
 progress.
 
-Bank display window
--------------------
-
-Run with ``--display`` to open a floating window showing the current bank
-name in a large, easy-to-read font::
-
-    midi-remapper mycontroller.py --display
-
-Add ``--no-titlebar`` to remove the OS title bar for a more compact display::
-
-    midi-remapper mycontroller.py --no-titlebar
-
-In titlebar-less mode, right-click anywhere on the window for a menu with
-**Exit** (quit the program) and **Cancel** (dismiss the menu).
-
-The window stays on top of other windows and updates immediately on every
-bank switch, so you can glance at it during a performance to confirm that
-a chord or double press registered correctly.
-
-The large text is the name of the active bank.  The small label above it is
-the **BankSet name** -- the ``"name"`` key of the BankSet in your config
-file, not anything detected from the hardware.  In the screenshots at the
-top it is ``actition``, the name one config gives to the BankSet holding the
-mappings for its ActitioN footswitch.  When a config has several BankSets,
-the window shows whichever one last switched banks (at startup, the first
-BankSet that has more than one bank or starts on a bank other than
-``"default"``).  The colors come from each bank's
-``"_display"`` style (see *Per-bank styling* below).  While a snapback is
-pending, the bank name has a border in the return bank's text color (see
-"Snapback" under `Mapping types`_).
-
-**Per-bank styling**
-
-Each bank can define its own background color, text color, font size,
-and window dimensions via a ``"_display"`` key placed directly inside the
-bank dict in the config file::
-
-    "banks": {
-        "default": {
-            "_display": {"bg": "#1a1a2e", "fg": "#e0e0ff"},
-            "CC0": [{"send": "CC10", "press_only": True}],
-        },
-        "drums": {
-            "_display": {"bg": "#1a2e1a", "fg": "#a0ffb0",
-                         "font_size": 80, "width": 400, "height": 200},
-            "CC0": [{"send": "CC11", "press_only": True}],
-        },
-    },
-
-All five keys are optional.  Any key omitted falls back to its own
-default (dark background, white text, 72-point font).  ``"_display"`` is
-stripped before MIDI mapping lookup and does not interfere with any
-event key.
-
-Style changes take effect immediately on the next bank switch.  When the
-config file is reloaded live, the new styles are applied at once without
-needing to switch banks first.
-
-Available style keys:
-
-==================  ===========================================
-Key                 Effect
-==================  ===========================================
-``bg``              Background color (any Tk color string)
-``fg``              Text color
-``font_size``       Bank-name font size in points
-``width``           Window width in pixels
-``height``          Window height in pixels
-==================  ===========================================
-
-Debug output
-------------
-
-Two independent debug flags control what is printed:
-
-Dispatcher level
-    Prints ``[in]`` (every incoming event), ``[dispatch]`` (which BankSet
-    handled it), and startup messages.  Turn it on with ``--debug``, with
-    ``"debug": True`` in a config file's global settings block (which can
-    be changed while running), or with ``DEBUG`` in the package's
-    ``config.py``.
-
-BankSet level
-    Prints ``[BankSet:name] handle key=...``, gesture timing, chord
-    windows, and sequence dispatch detail for one BankSet.  Turn it on with
-    ``"debug": True`` inside that BankSet's dict.
-
-The ``--debug`` CLI flag sets both levels simultaneously and is the
-simplest way to get full output.  Setting ``"debug": True`` inside a
-BankSet dict gives internal trace for that BankSet only, without the
-dispatcher-level wrapper lines.  This is useful when you have multiple
-BankSets and want to trace only one without flooding the terminal.
-
-Live reloading
---------------
-
-When one or more config files are passed on the command line,
-``midi-remapper`` watches them for changes and reloads them automatically
-while the program is running.  This makes it easy to experiment with
-mappings without restarting:
-
-1. Start ``midi-remapper`` as usual::
-
-       midi-remapper mycontroller.py
-
-2. Edit and save ``mycontroller.py`` in your text editor.
-3. The program detects the change within about one second and prints::
-
-       [reload] mycontroller.py changed, reloading...
-       [reload] mycontroller.py: OK  (active banks: mycontroller=default)
-
-   Your new mappings take effect immediately.
-
-If the file contains a syntax or validation error, the current config is
-kept and an error message is printed -- the program keeps running on the
-last good config.  Fix the error and save again to retry.
-
-The currently active bank is preserved across reloads when the bank name
-still exists in the new config.  If you rename or remove the active bank,
-the BankSet resets to its ``active_bank`` setting (usually ``"default"``).
-
-Pass ``--no-reload`` to disable file watching entirely.
-
-The ``"debug"`` key in a global settings block is one of the things that
-can be toggled live::
-
-    [
-        {"debug": True},
-        {"name": "main", "banks": { ... }},
-    ]
-
-Changing ``"debug"`` from ``False`` to ``True`` and saving will enable
-dispatcher-level output immediately without restarting.
-
-JACK connection
----------------
-
-After starting ``midi-remapper``, connect ports in QjackCtl Graph or
-with ``jack_connect``::
-
-    jack_connect \
-        "a2j:MyController [20] (capture): MyController MIDI 1" \
-        "midi_remapper:in_0"
-
-    jack_connect \
-        "midi_remapper:out_0" \
-        "Hydrogen-midi:RX"
-
-The client name ``midi_remapper`` can be changed with ``--client-name NAME``
-on the command line, or permanently via ``CLIENT_NAME`` in ``config.py``.
 
 Development
 -----------
@@ -1443,6 +1477,7 @@ because the choice is made at module import time, before argument parsing.
 The extension uses C-typed local variables to cut Python attribute-lookup
 overhead on every event.  Adding ``nogil`` sections for the scalar
 classification logic is a possible later step.
+
 
 License
 -------
