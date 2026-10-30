@@ -16,6 +16,24 @@ press need no release at all -- they only count presses within a time
 window -- so they also work on event types that have no release signal,
 such as Program Change.
 
+An optional window (``--display``) shows the active bank in large type,
+in colors set per bank, so a bank switch can be confirmed at a glance
+(see `Bank display window`_).
+
+.. figure:: screenshots/bank-display-drums.png
+   :alt: Bank display window showing the bank name "drums" in salmon text
+         on a dark red background
+
+   The ``drums`` bank of the ``actition`` BankSet, styled
+   ``{"bg": "#2e1a1a", "fg": "#ffb0a0"}``.
+
+.. figure:: screenshots/bank-display-looper.png
+   :alt: Bank display window showing the bank name "looper" in light green
+         text on a dark green background
+
+   The ``looper`` bank of the ``actition`` BankSet, styled
+   ``{"bg": "#1a2e1a", "fg": "#a0ffb0"}``.
+
 .. _mididings: https://github.com/mididings/mididings
 
 .. contents:: Contents
@@ -1225,27 +1243,15 @@ a chord or double press registered correctly.
 
 The large text is the name of the active bank.  The small label above it is
 the **BankSet name** -- the ``"name"`` key of the BankSet in your config
-file, not anything detected from the hardware.  In the screenshots below it
-is ``actition``, the name one config gives to the BankSet holding the
+file, not anything detected from the hardware.  In the screenshots at the
+top it is ``actition``, the name one config gives to the BankSet holding the
 mappings for its ActitioN footswitch.  When a config has several BankSets,
 the window shows whichever one last switched banks (at startup, the first
 BankSet that has more than one bank or starts on a bank other than
 ``"default"``).  The colors come from each bank's
-``"_display"`` style (see *Per-bank styling* below).
-
-.. figure:: screenshots/bank-display-drums.png
-   :alt: Bank display window showing the bank name "drums" in salmon text
-         on a dark red background
-
-   The ``drums`` bank of the ``actition`` BankSet, styled
-   ``{"bg": "#2e1a1a", "fg": "#ffb0a0"}``.
-
-.. figure:: screenshots/bank-display-looper.png
-   :alt: Bank display window showing the bank name "looper" in light green
-         text on a dark green background
-
-   The ``looper`` bank of the ``actition`` BankSet, styled
-   ``{"bg": "#1a2e1a", "fg": "#a0ffb0"}``.
+``"_display"`` style (see *Per-bank styling* below).  While a snapback is
+pending, the bank name has a border in the return bank's text color (see
+"Snapback" under `Mapping types`_).
 
 **Per-bank styling**
 
