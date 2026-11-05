@@ -361,10 +361,12 @@ Command-line reference
 
     A receiver that places JACK MIDI events at their exact sample, such as
     the forked SooperLooper's ``midi_in`` port, therefore sees up to one
-    period of timing scatter.  Stock SooperLooper (ALSA MIDI only) starts
-    commands at the beginning of a period anyway, and ``jack-rt`` still
-    saves the period.  The experimental ``--keep-offsets`` option, below,
-    removes the scatter.
+    period of timing scatter.  Stock SooperLooper reads MIDI only over
+    ALSA (through a bridge such as a2jmidid), so JACK's sample offsets do
+    not reach it: it timestamps each command when it arrives and applies
+    it one period later at the matching position.  ``jack-rt`` still
+    saves a period there.  The experimental ``--keep-offsets`` option,
+    below, removes the scatter.
 
     Also calls ``sys.setswitchinterval(0.0001)`` to reduce the chance
     that the Python GIL is held by another thread when the JACK callback
