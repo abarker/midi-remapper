@@ -7,7 +7,7 @@ One scheduler thread for timed callbacks, in place of a thread per timer.
 an OS thread each time, inside the JACK callback under ``--jack-rt``.
 Here, starting a timer only puts it on a queue, which never blocks and
 creates no thread; one long-lived thread waits for the earliest deadline
-and runs the callbacks one at a time.  See ROADMAP entry 5.
+and runs the callbacks one at a time.
 
 ``Timer`` offers the subset of ``threading.Timer`` that ``BankSet`` uses
 (the constructor, ``daemon``, ``start()``, ``cancel()``, ``is_alive()``);
